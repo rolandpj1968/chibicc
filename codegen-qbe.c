@@ -23,6 +23,14 @@ static void println(char *fmt, ...) {
   fprintf(output_file, "\n");
 }
 
+__attribute__((format(printf, 1, 2)))
+static void print(char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(output_file, fmt, ap);
+  va_end(ap);
+}
+
 static int count(void) {
   static int i = 1;
   return i++;
@@ -1369,21 +1377,13 @@ static void assign_lvar_offsets(Obj *prog) {
   }
 }
 
-static void emit_data(Obj *prog) {
-  const char* maybe_export;
-  const char* maybe_section = "";
-  
+static void emit_data_qbe(Obj *prog) {
   for (Obj *var = prog; var; var = var->next) {
     if (var->is_function || !var->is_definition)
       continue;
 
-    if (var->is_static) {
-      println("#  .local %s", var->name);
-      maybe_export = "";
-    }
-    else {
-      println("#  .globl %s", var->name);
-      maybe_export = "export ";
+    if (!var->is_static) {
+      println("export");
     }
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
@@ -1391,49 +1391,55 @@ static void emit_data(Obj *prog) {
 
     // Common symbol
     if (opt_fcommon && var->is_tentative) {
-      println("#  .comm %s, %d, %d", var->name, var->ty->size, align);
-      println("#RPJ - missed tentative var");
+      println("section \".comm\"");
+      println("data $%s = align %d { z %d }\n", var->name, align, var->ty->size);
       continue;
     }
 
     // .data or .tdata
     if (var->init_data) {
-      if (var->is_tls)
-        println("#  .section .tdata,\"awT\",@progbits");
-      else
-        println("#  .data");
+      if (var->is_tls) {
+        println("section \".tdata\" \"\\\"awT\\\",@progbits\"");
+      }
+      else {
+	println("section \".data\"");
+      }
 
-      println("#  .type %s, @object", var->name);
-      println("#  .size %s, %d", var->name, var->ty->size);
-      println("#  .align %d", align);
-      println("#%s:", var->name);
-
+      print("data $%s = { ", var->name);
+      
       Relocation *rel = var->rel;
       int pos = 0;
       while (pos < var->ty->size) {
         if (rel && rel->offset == pos) {
-          println("#  .quad %s%+ld", *rel->label, rel->addend);
+	  //println("  .type %s, @object", var->name); ???
+	  print("l $%s", *rel->label);
+	  if (rel->addend) {
+	    // TODO - is +N valid QBE?
+	    print("%+ld, ", rel->addend);
+	  }
+	  print(", ");
           rel = rel->next;
           pos += 8;
         } else {
-          println("#  .byte %d", var->init_data[pos++]);
+	  print("b %d, ", var->init_data[pos++]);
         }
       }
-      println("#RPJ - missed init data");
-      //continue;
+      println("}\n");
+
+      continue;
     }
 
+    // RPJ - never get here?
+    
     // .bss or .tbss
-    if (var->is_tls)
-      println("#  .section .tbss,\"awT\",@nobits");
-    else
-      println("#  .bss");
+    if (var->is_tls) {
+      println("section \".tbss\" \"\\\"awT\\\",@nobits\"");
+    }
+    else {
+      println("section \".bss\"");
+    }
 
-    println("#  .align %d", align);
-    println("#%s:", var->name);
-    println("#  .zero %d", var->ty->size);
-
-    println("%s%%data $%s = { z %d }", maybe_export, var->name, var->ty->size);
+    println("data $%s = { z %d }\n", var->name, var->ty->size);
   }
 }
 
@@ -1593,8 +1599,9 @@ void codegen_qbe(Obj *prog, FILE *out) {
   File **files = get_input_files();
   for (int i = 0; files[i]; i++)
     println("#![qbe]  .file %d \"%s\"", files[i]->file_no, files[i]->name);
-
+  print("\n");
+  
   assign_lvar_offsets(prog);
-  emit_data(prog);
+  emit_data_qbe(prog);
   emit_text(prog);
 }
