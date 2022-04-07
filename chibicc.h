@@ -21,6 +21,11 @@
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 
+//
+// Needs a home - currently in main.c
+//
+int align_to(int n, int align);
+
 #ifndef __GNUC__
 # define __attribute__(x)
 #endif
@@ -409,7 +414,12 @@ void add_type(Node *node);
 //
 
 void codegen(Obj *prog, FILE *out);
-int align_to(int n, int align);
+
+//
+// codegen-qbe.c
+//
+
+void codegen_qbe(Obj *prog, FILE *out);
 
 //
 // unicode.c

@@ -1,5 +1,11 @@
 #include "chibicc.h"
 
+// Round up `n` to the nearest multiple of `align`. For instance,
+// align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
+int align_to(int n, int align) {
+  return (n + align - 1) / align * align;
+}
+
 typedef enum {
   FILE_NONE, FILE_C, FILE_ASM, FILE_OBJ, FILE_AR, FILE_DSO,
 } FileType;
@@ -558,7 +564,7 @@ static void cc1(void) {
   FILE *output_buf = open_memstream(&buf, &buflen);
 
   // Traverse the AST to emit assembly.
-  codegen(prog, output_buf);
+  codegen_qbe(prog, output_buf);
   fclose(output_buf);
 
   // Write the asembly text to a file.
