@@ -2637,8 +2637,12 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
   // Read a tag.
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
+    printf("Struct name is %.*s\n", tok->len, tok->loc);
     tag = tok;
     tok = tok->next;
+  }
+  else {
+    printf("Anonymous struct\n");
   }
 
   if (tag && !equal(tok, "{")) {
@@ -2664,10 +2668,12 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
     // Otherwise, register the struct type.
     Type *ty2 = hashmap_get2(&scope->tags, tag->loc, tag->len);
     if (ty2) {
+      printf("RPJ - ignoring redefinition of struct %.*s\n", tag->len, tag->loc);
       *ty2 = *ty;
       return ty2;
     }
 
+    ty->ident = get_ident(tag);
     push_tag_scope(tag, ty);
   }
 

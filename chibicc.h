@@ -351,7 +351,8 @@ struct Type {
   Node *vla_len; // # of elements
   Obj *vla_size; // sizeof() value
 
-  // Struct
+  // Struct or Union
+  char* ident;
   Member *members;
   bool is_flexible;
   bool is_packed;
@@ -361,6 +362,9 @@ struct Type {
   Type *params;
   bool is_variadic;
   Type *next;
+
+  // QBE codegen
+  bool emitted;
 };
 
 // Struct member

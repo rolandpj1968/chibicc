@@ -27,6 +27,7 @@ static bool opt_cc1;
 static bool opt_hash_hash_hash;
 static bool opt_static;
 static bool opt_shared;
+static bool opt_qbe;
 static char *opt_MF;
 static char *opt_MT;
 static char *opt_o;
@@ -304,6 +305,11 @@ static void parse_args(int argc, char **argv) {
       continue;
     }
 
+    if (!strcmp(argv[i], "-qbe")) {
+      opt_qbe = true;
+      continue;
+    }
+
     if (!strcmp(argv[i], "-L")) {
       strarray_push(&ld_extra_args, "-L");
       strarray_push(&ld_extra_args, argv[++i]);
@@ -564,7 +570,12 @@ static void cc1(void) {
   FILE *output_buf = open_memstream(&buf, &buflen);
 
   // Traverse the AST to emit assembly.
-  codegen_qbe(prog, output_buf);
+  if (opt_qbe) {
+    codegen_qbe(prog, output_buf);
+  }
+  else {
+    codegen(prog, output_buf);
+  }
   fclose(output_buf);
 
   // Write the asembly text to a file.

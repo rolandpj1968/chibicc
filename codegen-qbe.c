@@ -31,6 +31,87 @@ static void print(char *fmt, ...) {
   va_end(ap);
 }
 
+static void printstructident(Type* ty) {
+  if (ty->ident) {
+    print("%s", ty->ident);
+  }
+  else {
+    print("anon.%lx", (long)ty);
+  }
+}
+
+static void printparamtype(Type* ty) {
+  char t = 0;
+  bool skip = false;
+  
+  switch (ty->kind) {
+  case TY_VOID:
+    skip = true;
+    break;
+    
+  case TY_BOOL:
+  case TY_CHAR:
+    t = 'b';
+    break;
+    
+  case TY_SHORT:
+    t = 'h';
+    break;
+    
+  case TY_INT:
+  case TY_ENUM:
+    t = 'w';
+    break;
+    
+  case TY_FLOAT:
+    t = 's';
+    break;
+    
+  case TY_DOUBLE:
+  case TY_LDOUBLE:
+    t = 'd';
+    break;
+
+  case TY_LONG:
+  case TY_PTR:
+  case TY_FUNC:
+  case TY_ARRAY:
+  case TY_VLA: // variable-length array
+    t = 'l';
+    break;
+    
+  case TY_STRUCT:
+  case TY_UNION:
+    print(":");
+    printstructident(ty);
+    skip = true;
+  }
+
+  if (!skip)
+    print("%c", t);
+}
+
+static void printstructarraytype(Type* ty, unsigned long accum) {
+  if (ty->kind == TY_ARRAY) {
+    printstructarraytype(ty->base, accum * ty->array_len);
+  }
+  else {
+    printparamtype(ty);
+    print(" %lu", accum);
+  }
+}
+
+static void printstructmembertype(Type* ty) {
+  // Arrays are inlined in structs
+  if (ty->kind == TY_ARRAY) {
+    // Need to multiply out multi-dimensional arrays...
+    printstructarraytype(ty->base, ty->array_len);
+    return;
+  }
+
+  printparamtype(ty);
+}
+
 static int count(void) {
   static int i = 1;
   return i++;
@@ -1377,6 +1458,75 @@ static void assign_lvar_offsets(Obj *prog) {
   }
 }
 
+static void emit_type_qbe(Type* ty);
+
+static void emit_member_types_qbe(Member* members) {
+  for(Member* member = members; member; member = member->next) {
+    emit_type_qbe(member->ty);
+  }
+}
+
+static void emit_struct_members_qbe(Member* members) {
+  for(Member* member = members; member; member = member->next) {
+    print(" ");
+    printstructmembertype(member->ty);
+    print(",");
+  }
+}
+
+static void emit_struct_type_qbe(Type* ty) {
+  emit_member_types_qbe(ty->members);
+
+  print("type :");
+  printstructident(ty);
+  print(" = align %d {", ty->align);
+  emit_struct_members_qbe(ty->members);
+  println(" }%s\n", (ty->is_packed ? " # TODO packed" :""));
+}
+
+static void emit_union_type_qbe(Type* ty) {
+  emit_member_types_qbe(ty->members);
+
+  // We treat unions as opaque types
+  print("type :");
+  printstructident(ty);
+  println(" = align %d { %d }\n", ty->align, ty->size);
+}
+
+static void emit_type_qbe(Type* ty) {
+  if (ty->emitted) {
+    return;
+  }
+  
+  if (ty->kind == TY_STRUCT) {
+    emit_struct_type_qbe(ty);
+  }
+  else if(ty->kind == TY_UNION) {
+    emit_union_type_qbe(ty);
+  }
+
+  ty->emitted = true;
+}
+
+static void emit_function_types_qbe(Type* ty) {
+  emit_type_qbe(ty->return_ty);
+
+  for(Type* param_ty = ty->params; param_ty; param_ty = param_ty->next) {
+    emit_type_qbe(param_ty);
+  }
+}
+
+static void emit_types_qbe(Obj *prog) {
+  for (Obj *obj = prog; obj; obj = obj->next) {
+    if (obj->is_function) {
+      emit_function_types_qbe(obj->ty);
+      continue;
+    }
+
+    emit_type_qbe(obj->ty);
+  }
+}
+
 static void emit_data_qbe(Obj *prog) {
   for (Obj *var = prog; var; var = var->next) {
     if (var->is_function || !var->is_definition)
@@ -1478,7 +1628,7 @@ static void store_gp(int r, int offset, int sz) {
   }
 }
 
-static void emit_text(Obj *prog) {
+static void emit_text_qbe(Obj *prog) {
   for (Obj *fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition)
       continue;
@@ -1488,92 +1638,36 @@ static void emit_text(Obj *prog) {
     if (!fn->is_live)
       continue;
 
-    if (fn->is_static)
-      println("#  .local %s", fn->name);
-    else
-      println("#  .globl %s", fn->name);
+    if (!fn->is_static)
+      println("export");
 
-    println("#  .text");
-    println("#  .type %s, @function", fn->name);
-    println("#%s:", fn->name);
+    println("section \".text\"");
+    print("function ");
+    
+    if (fn->ty->return_ty != TY_VOID) {
+      printparamtype(fn->ty->return_ty);
+      print(" ");
+    }
+    
+    print("$%s (", fn->name);
+    for (Obj *var = fn->params; var; var = var->next) {
+      printparamtype(var->ty);
+      print(" %%%s", var->name);
+      if (var->next)
+	print(", ");
+    }
+    if (fn->va_area) {
+      print("%s...", (fn->params ? ", " : ""));
+    }
+    println(") {");
+
+    println("@start\n");
+    
     current_fn = fn;
 
-    // Prologue
-    println("#  push %%rbp");
-    println("#  mov %%rsp, %%rbp");
-    println("#  sub $%d, %%rsp", fn->stack_size);
-    println("#  mov %%rsp, %d(%%rbp)", fn->alloca_bottom->offset);
-
-    // Save arg registers if function is variadic
-    if (fn->va_area) {
-      int gp = 0, fp = 0;
-      for (Obj *var = fn->params; var; var = var->next) {
-        if (is_flonum(var->ty))
-          fp++;
-        else
-          gp++;
-      }
-
-      int off = fn->va_area->offset;
-
-      // va_elem
-      println("#  movl $%d, %d(%%rbp)", gp * 8, off);          // gp_offset
-      println("#  movl $%d, %d(%%rbp)", fp * 8 + 48, off + 4); // fp_offset
-      println("#  movq %%rbp, %d(%%rbp)", off + 8);            // overflow_arg_area
-      println("#  addq $16, %d(%%rbp)", off + 8);
-      println("#  movq %%rbp, %d(%%rbp)", off + 16);           // reg_save_area
-      println("#  addq $%d, %d(%%rbp)", off + 24, off + 16);
-
-      // __reg_save_area__
-      println("#  movq %%rdi, %d(%%rbp)", off + 24);
-      println("#  movq %%rsi, %d(%%rbp)", off + 32);
-      println("#  movq %%rdx, %d(%%rbp)", off + 40);
-      println("#  movq %%rcx, %d(%%rbp)", off + 48);
-      println("#  movq %%r8, %d(%%rbp)", off + 56);
-      println("#  movq %%r9, %d(%%rbp)", off + 64);
-      println("#  movsd %%xmm0, %d(%%rbp)", off + 72);
-      println("#  movsd %%xmm1, %d(%%rbp)", off + 80);
-      println("#  movsd %%xmm2, %d(%%rbp)", off + 88);
-      println("#  movsd %%xmm3, %d(%%rbp)", off + 96);
-      println("#  movsd %%xmm4, %d(%%rbp)", off + 104);
-      println("#  movsd %%xmm5, %d(%%rbp)", off + 112);
-      println("#  movsd %%xmm6, %d(%%rbp)", off + 120);
-      println("#  movsd %%xmm7, %d(%%rbp)", off + 128);
-    }
-
-    // Save passed-by-register arguments to the stack
-    int gp = 0, fp = 0;
-    for (Obj *var = fn->params; var; var = var->next) {
-      if (var->offset > 0)
-        continue;
-
-      Type *ty = var->ty;
-
-      switch (ty->kind) {
-      case TY_STRUCT:
-      case TY_UNION:
-        assert(ty->size <= 16);
-        if (has_flonum(ty, 0, 8, 0))
-          store_fp(fp++, var->offset, MIN(8, ty->size));
-        else
-          store_gp(gp++, var->offset, MIN(8, ty->size));
-
-        if (ty->size > 8) {
-          if (has_flonum(ty, 8, 16, 0))
-            store_fp(fp++, var->offset + 8, ty->size - 8);
-          else
-            store_gp(gp++, var->offset + 8, ty->size - 8);
-        }
-        break;
-      case TY_FLOAT:
-      case TY_DOUBLE:
-        store_fp(fp++, var->offset, ty->size);
-        break;
-      default:
-        store_gp(gp++, var->offset, ty->size);
-      }
-    }
-
+    // TODO
+    println("# TODO alloca local vars\n");
+    
     // Emit code
     gen_stmt(fn->body);
     assert(depth == 0);
@@ -1583,13 +1677,12 @@ static void emit_text(Obj *prog) {
     // main function is equivalent to returning 0, even though the
     // behavior is undefined for the other functions.
     if (strcmp(fn->name, "main") == 0)
+      // TODO
       println("#  mov $0, %%rax");
 
     // Epilogue
-    println("#.L.return.%s:", fn->name);
-    println("#  mov %%rbp, %%rsp");
-    println("#  pop %%rbp");
-    println("#  ret");
+    println("}\n");
+    //println("#.L.return.%s:", fn->name);
   }
 }
 
@@ -1600,8 +1693,13 @@ void codegen_qbe(Obj *prog, FILE *out) {
   for (int i = 0; files[i]; i++)
     println("#![qbe]  .file %d \"%s\"", files[i]->file_no, files[i]->name);
   print("\n");
-  
+
+  // Not required for QBE - we just use var names
   assign_lvar_offsets(prog);
+
+  // TODO
+  emit_types_qbe(prog);
+  
   emit_data_qbe(prog);
-  emit_text(prog);
+  emit_text_qbe(prog);
 }
