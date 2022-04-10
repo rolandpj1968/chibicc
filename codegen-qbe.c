@@ -32,12 +32,8 @@ static void print(char *fmt, ...) {
 }
 
 static void printstructident(Type* ty) {
-  if (ty->ident) {
-    print("%s", ty->ident);
-  }
-  else {
-    print("anon.%lx", (long)ty);
-  }
+  // Use the memory address of the type to disambiguate homonymous structs
+  print("%s.%lx", (ty->ident ? ty->ident : "anon"), (long)ty);
 }
 
 static void printparamtype(Type* ty) {
@@ -1516,10 +1512,282 @@ static void emit_function_types_qbe(Type* ty) {
   }
 }
 
+static void emit_fn_call_types_in_stmt_qbe(Node* node);
+static void emit_fn_call_types_in_expr_qbe(Node* node);
+
+static void emit_fn_call_types_in_addr_qbe(Node* node) {
+  switch (node->kind) {
+  case ND_VAR:
+    return;
+  case ND_DEREF:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_COMMA:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    emit_fn_call_types_in_addr_qbe(node->rhs);
+    return;
+  case ND_MEMBER:
+    emit_fn_call_types_in_addr_qbe(node->lhs);
+    return;
+  case ND_FUNCALL:
+    if (node->ret_buffer) {
+      emit_fn_call_types_in_expr_qbe(node);
+      return;
+    }
+    break;
+  case ND_ASSIGN:
+  case ND_COND:
+    if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
+      emit_fn_call_types_in_expr_qbe(node);
+      return;
+    }
+    break;
+  case ND_VLA_PTR:
+    return;
+  }
+
+  error_tok(node->tok, "not an lvalue");
+}
+
+static void emit_fn_call_types_in_expr_qbe(Node* node) {
+  switch (node->kind) {
+  case ND_NULL_EXPR:
+    return;
+  case ND_NUM:
+    return;
+  case ND_NEG:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_VAR:
+    emit_fn_call_types_in_addr_qbe(node);
+    return;
+  case ND_MEMBER:
+    emit_fn_call_types_in_addr_qbe(node);
+    return;
+  case ND_DEREF:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    load(node->ty);
+    return;
+  case ND_ADDR:
+    emit_fn_call_types_in_addr_qbe(node->lhs);
+    return;
+  case ND_ASSIGN:
+    emit_fn_call_types_in_addr_qbe(node->lhs);
+    emit_fn_call_types_in_expr_qbe(node->rhs);
+    return;
+  case ND_STMT_EXPR:
+    for (Node *n = node->body; n; n = n->next)
+      emit_fn_call_types_in_stmt_qbe(n);
+    return;
+  case ND_COMMA:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    emit_fn_call_types_in_expr_qbe(node->rhs);
+    return;
+  case ND_CAST:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_MEMZERO:
+    return;
+  case ND_COND:
+    emit_fn_call_types_in_expr_qbe(node->cond);
+    emit_fn_call_types_in_expr_qbe(node->then);
+    emit_fn_call_types_in_expr_qbe(node->els);
+    return;
+  case ND_NOT:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_BITNOT:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_LOGAND:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    emit_fn_call_types_in_expr_qbe(node->rhs);
+    return;
+  case ND_LOGOR:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    emit_fn_call_types_in_expr_qbe(node->rhs);
+    return;
+  case ND_FUNCALL: {
+    for (Node* arg = node->args; arg; arg = arg->next)
+      emit_fn_call_types_in_expr_qbe(arg);
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+
+    // return type
+    emit_type_qbe(node->ty);
+
+    // param types
+    for (Node *arg = node->args; arg; arg = arg->next) {
+      Type *ty = arg->ty;
+
+      emit_type_qbe(ty);
+    }
+
+    return;
+  }
+  case ND_LABEL_VAL:
+    return;
+  case ND_CAS:
+    emit_fn_call_types_in_expr_qbe(node->cas_addr);
+    emit_fn_call_types_in_expr_qbe(node->cas_new);
+    emit_fn_call_types_in_expr_qbe(node->cas_old);
+    return;
+  case ND_EXCH:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    emit_fn_call_types_in_expr_qbe(node->rhs);
+    return;
+  }
+
+  switch (node->lhs->ty->kind) {
+  case TY_FLOAT:
+  case TY_DOUBLE: {
+    emit_fn_call_types_in_expr_qbe(node->rhs);
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+
+    switch (node->kind) {
+    case ND_ADD:
+      return;
+    case ND_SUB:
+      return;
+    case ND_MUL:
+      return;
+    case ND_DIV:
+      return;
+    case ND_EQ:
+    case ND_NE:
+    case ND_LT:
+    case ND_LE:
+      return;
+    }
+
+    error_tok(node->tok, "invalid expression");
+  }
+  case TY_LDOUBLE: {
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    emit_fn_call_types_in_expr_qbe(node->rhs);
+
+    switch (node->kind) {
+    case ND_ADD:
+      return;
+    case ND_SUB:
+      return;
+    case ND_MUL:
+      return;
+    case ND_DIV:
+      return;
+    case ND_EQ:
+    case ND_NE:
+    case ND_LT:
+    case ND_LE:
+      return;
+    }
+
+    error_tok(node->tok, "invalid expression");
+  }
+  }
+
+  emit_fn_call_types_in_expr_qbe(node->rhs);
+  emit_fn_call_types_in_expr_qbe(node->lhs);
+
+  switch (node->kind) {
+  case ND_ADD:
+    return;
+  case ND_SUB:
+    return;
+  case ND_MUL:
+    return;
+  case ND_DIV:
+  case ND_MOD:
+    return;
+  case ND_BITAND:
+    return;
+  case ND_BITOR:
+    return;
+  case ND_BITXOR:
+    return;
+  case ND_EQ:
+  case ND_NE:
+  case ND_LT:
+  case ND_LE:
+    return;
+  case ND_SHL:
+    return;
+  case ND_SHR:
+    return;
+
+  error_tok(node->tok, "invalid expression");
+}
+}
+
+static void emit_fn_call_types_in_stmt_qbe(Node* node) {
+  switch (node->kind) {
+  case ND_IF: {
+    emit_fn_call_types_in_expr_qbe(node->cond);
+    emit_fn_call_types_in_stmt_qbe(node->then);
+    if (node->els)
+      emit_fn_call_types_in_stmt_qbe(node->els);
+    return;
+  }
+  case ND_FOR: {
+    if (node->init)
+      emit_fn_call_types_in_stmt_qbe(node->init);
+    if (node->cond) {
+      emit_fn_call_types_in_expr_qbe(node->cond);
+    }
+    emit_fn_call_types_in_stmt_qbe(node->then);
+    if (node->inc)
+      emit_fn_call_types_in_expr_qbe(node->inc);
+    return;
+  }
+  case ND_DO: {
+    emit_fn_call_types_in_stmt_qbe(node->then);
+    emit_fn_call_types_in_expr_qbe(node->cond);
+    return;
+  }
+  case ND_SWITCH:
+    emit_fn_call_types_in_expr_qbe(node->cond);
+    emit_fn_call_types_in_stmt_qbe(node->then);
+    return;
+  case ND_CASE:
+    emit_fn_call_types_in_stmt_qbe(node->lhs);
+    return;
+  case ND_BLOCK:
+    for (Node *n = node->body; n; n = n->next)
+      emit_fn_call_types_in_stmt_qbe(n);
+    return;
+  case ND_GOTO:
+    return;
+  case ND_GOTO_EXPR:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_LABEL:
+    emit_fn_call_types_in_stmt_qbe(node->lhs);
+    return;
+  case ND_RETURN:
+    if (node->lhs)
+      emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_EXPR_STMT:
+    emit_fn_call_types_in_expr_qbe(node->lhs);
+    return;
+  case ND_ASM:
+    return;
+  }
+
+  error_tok(node->tok, "invalid statement");
+}
+
+static void emit_fn_call_types_qbe(Obj* fn) {
+  for (Node *n = fn->body; n; n = n->next)
+    emit_fn_call_types_in_stmt_qbe(n);
+}
+
 static void emit_types_qbe(Obj *prog) {
   for (Obj *obj = prog; obj; obj = obj->next) {
     if (obj->is_function) {
+      // For function definition ABI
       emit_function_types_qbe(obj->ty);
+      // For function call ABI
+      emit_fn_call_types_qbe(obj);
       continue;
     }
 
