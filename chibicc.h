@@ -263,6 +263,9 @@ struct Node {
   bool pass_by_stack;
   Obj *ret_buffer;
 
+  // Function call arg (QBE)
+  int val_tmp;
+
   // Goto or labeled statement, or labels-as-values
   char *label;
   char *unique_label;
