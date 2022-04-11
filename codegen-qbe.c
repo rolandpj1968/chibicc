@@ -10,9 +10,11 @@ static char *argreg16[] = {"%di", "%si", "%dx", "%cx", "%r8w", "%r9w"};
 static char *argreg32[] = {"%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"};
 static char *argreg64[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 static Obj *current_fn;
+static int current_temp;
 
-static void gen_expr(Node *node);
-static void gen_stmt(Node *node);
+// return the QBE tmp %N containing the value
+static int gen_expr(Node *node);
+static void gen_stmt_qbe(Node *node);
 
 __attribute__((format(printf, 1, 2)))
 static void println(char *fmt, ...) {
@@ -173,19 +175,20 @@ static char *reg_ax(int sz) {
 
 // Compute the absolute address of a given node.
 // It's an error if a given node does not reside in memory.
-static void gen_addr(Node *node) {
+// Return the temporary that the address resides in.
+static int gen_addr(Node *node) {
   switch (node->kind) {
   case ND_VAR:
     // Variable-length array, which is always local.
     if (node->var->ty->kind == TY_VLA) {
       println("#  mov %d(%%rbp), %%rax", node->var->offset);
-      return;
+      return 654321;
     }
 
     // Local variable
     if (node->var->is_local) {
       println("#  lea %d(%%rbp), %%rax", node->var->offset);
-      return;
+      return 654321;
     }
 
     if (opt_fpic) {
@@ -195,19 +198,19 @@ static void gen_addr(Node *node) {
         println("#  .value 0x6666");
         println("#  rex64");
         println("#  call __tls_get_addr@PLT");
-        return;
+        return 654321;
       }
 
       // Function or global variable
       println("#  mov %s@GOTPCREL(%%rip), %%rax", node->var->name);
-      return;
+      return 654321;
     }
 
     // Thread-local variable
     if (node->var->is_tls) {
       println("#  mov %%fs:0, %%rax");
       println("#  add $%s@tpoff, %%rax", node->var->name);
-      return;
+      return 654321;
     }
 
     // Here, we generate an absolute address of a function or a global
@@ -239,39 +242,39 @@ static void gen_addr(Node *node) {
         println("#  lea %s(%%rip), %%rax", node->var->name);
       else
         println("#  mov %s@GOTPCREL(%%rip), %%rax", node->var->name);
-      return;
+      return 654321;
     }
 
     // Global variable
     println("#  lea %s(%%rip), %%rax", node->var->name);
-    return;
+    return 654321;
   case ND_DEREF:
     gen_expr(node->lhs);
-    return;
+    return 654321;
   case ND_COMMA:
     gen_expr(node->lhs);
     gen_addr(node->rhs);
-    return;
+    return 654321;
   case ND_MEMBER:
     gen_addr(node->lhs);
     println("#  add $%d, %%rax", node->member->offset);
-    return;
+    return 654321;
   case ND_FUNCALL:
     if (node->ret_buffer) {
       gen_expr(node);
-      return;
+      return 654321;
     }
     break;
   case ND_ASSIGN:
   case ND_COND:
     if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
       gen_expr(node);
-      return;
+      return 654321;
     }
     break;
   case ND_VLA_PTR:
     println("#  lea %d(%%rbp), %%rax", node->var->offset);
-    return;
+    return 654321;
   }
 
   error_tok(node->tok, "not an lvalue");
@@ -784,25 +787,25 @@ static void builtin_alloca(void) {
 }
 
 // Generate code for a given node.
-static void gen_expr(Node *node) {
+static int gen_expr(Node *node) {
   println("#  .loc %d %d", node->tok->file->file_no, node->tok->line_no);
 
   switch (node->kind) {
   case ND_NULL_EXPR:
-    return;
+    return 123456;
   case ND_NUM: {
     switch (node->ty->kind) {
     case TY_FLOAT: {
       union { float f32; uint32_t u32; } u = { node->fval };
       println("#  mov $%u, %%eax  # float %Lf", u.u32, node->fval);
       println("#  movq %%rax, %%xmm0");
-      return;
+      return 123456;
     }
     case TY_DOUBLE: {
       union { double f64; uint64_t u64; } u = { node->fval };
       println("#  mov $%lu, %%rax  # double %Lf", u.u64, node->fval);
       println("#  movq %%rax, %%xmm0");
-      return;
+      return 123456;
     }
     case TY_LDOUBLE: {
       union { long double f80; uint64_t u64[2]; } u;
@@ -813,12 +816,12 @@ static void gen_expr(Node *node) {
       println("#  mov $%lu, %%rax", u.u64[1]);
       println("#  mov %%rax, -8(%%rsp)");
       println("#  fldt -16(%%rsp)");
-      return;
+      return 123456;
     }
     }
 
     println("#  mov $%ld, %%rax", node->val);
-    return;
+    return 123456;
   }
   case ND_NEG:
     gen_expr(node->lhs);
@@ -829,24 +832,24 @@ static void gen_expr(Node *node) {
       println("#  shl $31, %%rax");
       println("#  movq %%rax, %%xmm1");
       println("#  xorps %%xmm1, %%xmm0");
-      return;
+      return 123456;
     case TY_DOUBLE:
       println("#  mov $1, %%rax");
       println("#  shl $63, %%rax");
       println("#  movq %%rax, %%xmm1");
       println("#  xorpd %%xmm1, %%xmm0");
-      return;
+      return 123456;
     case TY_LDOUBLE:
       println("#  fchs");
-      return;
+      return 123456;
     }
 
     println("#  neg %%rax");
-    return;
+    return 123456;
   case ND_VAR:
     gen_addr(node);
     load(node->ty);
-    return;
+    return 123456;
   case ND_MEMBER: {
     gen_addr(node);
     load(node->ty);
@@ -859,15 +862,15 @@ static void gen_expr(Node *node) {
       else
         println("#  sar $%d, %%rax", 64 - mem->bit_width);
     }
-    return;
+    return 123456;
   }
   case ND_DEREF:
     gen_expr(node->lhs);
     load(node->ty);
-    return;
+    return 123456;
   case ND_ADDR:
     gen_addr(node->lhs);
-    return;
+    return 123456;
   case ND_ASSIGN:
     gen_addr(node->lhs);
     push();
@@ -892,30 +895,30 @@ static void gen_expr(Node *node) {
       println("#  or %%rdi, %%rax");
       store(node->ty);
       println("#  mov %%r8, %%rax");
-      return;
+      return 123456;
     }
 
     store(node->ty);
-    return;
+    return 123456;
   case ND_STMT_EXPR:
     for (Node *n = node->body; n; n = n->next)
-      gen_stmt(n);
-    return;
+      gen_stmt_qbe(n);
+    return 123456;
   case ND_COMMA:
     gen_expr(node->lhs);
     gen_expr(node->rhs);
-    return;
+    return 123456;
   case ND_CAST:
     gen_expr(node->lhs);
     cast(node->lhs->ty, node->ty);
-    return;
+    return 123456;
   case ND_MEMZERO:
     // `rep stosb` is equivalent to `memset(%rdi, %al, %rcx)`.
     println("#  mov $%d, %%rcx", node->var->ty->size);
     println("#  lea %d(%%rbp), %%rdi", node->var->offset);
     println("#  mov $0, %%al");
     println("#  rep stosb");
-    return;
+    return 123456;
   case ND_COND: {
     int c = count();
     gen_expr(node->cond);
@@ -926,18 +929,18 @@ static void gen_expr(Node *node) {
     println("#.L.else.%d:", c);
     gen_expr(node->els);
     println("#.L.end.%d:", c);
-    return;
+    return 123456;
   }
   case ND_NOT:
     gen_expr(node->lhs);
     cmp_zero(node->lhs->ty);
     println("#  sete %%al");
     println("#  movzx %%al, %%rax");
-    return;
+    return 123456;
   case ND_BITNOT:
     gen_expr(node->lhs);
     println("#  not %%rax");
-    return;
+    return 123456;
   case ND_LOGAND: {
     int c = count();
     gen_expr(node->lhs);
@@ -951,7 +954,7 @@ static void gen_expr(Node *node) {
     println("#.L.false.%d:", c);
     println("#  mov $0, %%rax");
     println("#.L.end.%d:", c);
-    return;
+    return 123456;
   }
   case ND_LOGOR: {
     int c = count();
@@ -966,14 +969,14 @@ static void gen_expr(Node *node) {
     println("#.L.true.%d:", c);
     println("#  mov $1, %%rax");
     println("#.L.end.%d:", c);
-    return;
+    return 123456;
   }
   case ND_FUNCALL: {
     if (node->lhs->kind == ND_VAR && !strcmp(node->lhs->var->name, "alloca")) {
       gen_expr(node->args);
       println("#  mov %%rax, %%rdi");
       builtin_alloca();
-      return;
+      return 123456;
     }
 
     int stack_args = push_args(node);
@@ -1038,19 +1041,19 @@ static void gen_expr(Node *node) {
     switch (node->ty->kind) {
     case TY_BOOL:
       println("#  movzx %%al, %%eax");
-      return;
+      return 123456;
     case TY_CHAR:
       if (node->ty->is_unsigned)
         println("#  movzbl %%al, %%eax");
       else
         println("#  movsbl %%al, %%eax");
-      return;
+      return 123456;
     case TY_SHORT:
       if (node->ty->is_unsigned)
         println("#  movzwl %%ax, %%eax");
       else
         println("#  movswl %%ax, %%eax");
-      return;
+      return 123456;
     }
 
     // If the return type is a small struct, a value is returned
@@ -1060,11 +1063,11 @@ static void gen_expr(Node *node) {
       println("#  lea %d(%%rbp), %%rax", node->ret_buffer->offset);
     }
 
-    return;
+    return 123456;
   }
   case ND_LABEL_VAL:
     println("#  lea %s(%%rip), %%rax", node->unique_label);
-    return;
+    return 123456;
   case ND_CAS: {
     gen_expr(node->cas_addr);
     push();
@@ -1083,7 +1086,7 @@ static void gen_expr(Node *node) {
     println("#  mov %s, (%%r8)", reg_ax(sz));
     println("#1:");
     println("#  movzbl %%cl, %%eax");
-    return;
+    return 123456;
   }
   case ND_EXCH: {
     gen_expr(node->lhs);
@@ -1093,7 +1096,7 @@ static void gen_expr(Node *node) {
 
     int sz = node->lhs->ty->base->size;
     println("#  xchg %s, (%%rdi)", reg_ax(sz));
-    return;
+    return 123456;
   }
   }
 
@@ -1110,16 +1113,16 @@ static void gen_expr(Node *node) {
     switch (node->kind) {
     case ND_ADD:
       println("#  add%s %%xmm1, %%xmm0", sz);
-      return;
+      return 123456;
     case ND_SUB:
       println("#  sub%s %%xmm1, %%xmm0", sz);
-      return;
+      return 123456;
     case ND_MUL:
       println("#  mul%s %%xmm1, %%xmm0", sz);
-      return;
+      return 123456;
     case ND_DIV:
       println("#  div%s %%xmm1, %%xmm0", sz);
-      return;
+      return 123456;
     case ND_EQ:
     case ND_NE:
     case ND_LT:
@@ -1142,7 +1145,7 @@ static void gen_expr(Node *node) {
 
       println("#  and $1, %%al");
       println("#  movzb %%al, %%rax");
-      return;
+      return 123456;
     }
 
     error_tok(node->tok, "invalid expression");
@@ -1154,16 +1157,16 @@ static void gen_expr(Node *node) {
     switch (node->kind) {
     case ND_ADD:
       println("#  faddp");
-      return;
+      return 123456;
     case ND_SUB:
       println("#  fsubrp");
-      return;
+      return 123456;
     case ND_MUL:
       println("#  fmulp");
-      return;
+      return 123456;
     case ND_DIV:
       println("#  fdivrp");
-      return;
+      return 123456;
     case ND_EQ:
     case ND_NE:
     case ND_LT:
@@ -1181,7 +1184,7 @@ static void gen_expr(Node *node) {
         println("#  setae %%al");
 
       println("#  movzb %%al, %%rax");
-      return;
+      return 123456;
     }
 
     error_tok(node->tok, "invalid expression");
@@ -1208,13 +1211,13 @@ static void gen_expr(Node *node) {
   switch (node->kind) {
   case ND_ADD:
     println("#  add %s, %s", di, ax);
-    return;
+    return 123456;
   case ND_SUB:
     println("#  sub %s, %s", di, ax);
-    return;
+    return 123456;
   case ND_MUL:
     println("#  imul %s, %s", di, ax);
-    return;
+    return 123456;
   case ND_DIV:
   case ND_MOD:
     if (node->ty->is_unsigned) {
@@ -1230,16 +1233,16 @@ static void gen_expr(Node *node) {
 
     if (node->kind == ND_MOD)
       println("#  mov %%rdx, %%rax");
-    return;
+    return 123456;
   case ND_BITAND:
     println("#  and %s, %s", di, ax);
-    return;
+    return 123456;
   case ND_BITOR:
     println("#  or %s, %s", di, ax);
-    return;
+    return 123456;
   case ND_BITXOR:
     println("#  xor %s, %s", di, ax);
-    return;
+    return 123456;
   case ND_EQ:
   case ND_NE:
   case ND_LT:
@@ -1263,51 +1266,52 @@ static void gen_expr(Node *node) {
     }
 
     println("#  movzb %%al, %%rax");
-    return;
+    return 123456;
   case ND_SHL:
     println("#  mov %%rdi, %%rcx");
     println("#  shl %%cl, %s", ax);
-    return;
+    return 123456;
   case ND_SHR:
     println("#  mov %%rdi, %%rcx");
     if (node->lhs->ty->is_unsigned)
       println("#  shr %%cl, %s", ax);
     else
       println("#  sar %%cl, %s", ax);
-    return;
+    return 123456;
   }
 
   error_tok(node->tok, "invalid expression");
 }
 
-static void gen_stmt(Node *node) {
-  println("#  .loc %d %d", node->tok->file->file_no, node->tok->line_no);
+static void gen_stmt_qbe(Node *node) {
+  //println("#  .loc %d %d", node->tok->file->file_no, node->tok->line_no);
 
   switch (node->kind) {
   case ND_IF: {
     int c = count();
-    gen_expr(node->cond);
-    cmp_zero(node->cond->ty);
-    println("#  je  .L.else.%d", c);
-    gen_stmt(node->then);
-    println("#  jmp .L.end.%d", c);
-    println("#.L.else.%d:", c);
+    int cond_tmp = gen_expr(node->cond);
+    //cmp_zero(cond_tmp, node->cond->ty);
+    println("  jnz %%%d @if.%d.then @if.%d.else", cond_tmp, c, c);
+    println("@if.%d.then", c);
+    gen_stmt_qbe(node->then);
+    println("  jmp @if.%d.fi", c);
+    println("@if.%d.else", c);
     if (node->els)
-      gen_stmt(node->els);
-    println("#.L.end.%d:", c);
+      gen_stmt_qbe(node->els);
+    println("@if.%d.fi\n", c);
     return;
   }
   case ND_FOR: {
     int c = count();
     if (node->init)
-      gen_stmt(node->init);
+      gen_stmt_qbe(node->init);
     println("#.L.begin.%d:", c);
     if (node->cond) {
       gen_expr(node->cond);
       cmp_zero(node->cond->ty);
       println("#  je %s", node->brk_label);
     }
-    gen_stmt(node->then);
+    gen_stmt_qbe(node->then);
     println("#%s:", node->cont_label);
     if (node->inc)
       gen_expr(node->inc);
@@ -1318,7 +1322,7 @@ static void gen_stmt(Node *node) {
   case ND_DO: {
     int c = count();
     println("#.L.begin.%d:", c);
-    gen_stmt(node->then);
+    gen_stmt_qbe(node->then);
     println("#%s:", node->cont_label);
     gen_expr(node->cond);
     cmp_zero(node->cond->ty);
@@ -1350,16 +1354,16 @@ static void gen_stmt(Node *node) {
       println("#  jmp %s", node->default_case->label);
 
     println("#  jmp %s", node->brk_label);
-    gen_stmt(node->then);
+    gen_stmt_qbe(node->then);
     println("#%s:", node->brk_label);
     return;
   case ND_CASE:
     println("#%s:", node->label);
-    gen_stmt(node->lhs);
+    gen_stmt_qbe(node->lhs);
     return;
   case ND_BLOCK:
     for (Node *n = node->body; n; n = n->next)
-      gen_stmt(n);
+      gen_stmt_qbe(n);
     return;
   case ND_GOTO:
     println("#  jmp %s", node->unique_label);
@@ -1370,7 +1374,7 @@ static void gen_stmt(Node *node) {
     return;
   case ND_LABEL:
     println("#%s:", node->unique_label);
-    gen_stmt(node->lhs);
+    gen_stmt_qbe(node->lhs);
     return;
   case ND_RETURN:
     if (node->lhs) {
@@ -1949,6 +1953,7 @@ static void emit_text_qbe(Obj *prog) {
     println("@start\n");
     
     current_fn = fn;
+    current_temp = 1;
 
     // TODO
     //printf("RPJ params:\n");
@@ -1971,7 +1976,7 @@ static void emit_text_qbe(Obj *prog) {
     print("\n");
     
     // Emit code
-    gen_stmt(fn->body);
+    gen_stmt_qbe(fn->body);
     assert(depth == 0);
 
     // [https://www.sigbus.info/n1570#5.1.2.2.3p1] The C spec defines
