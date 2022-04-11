@@ -108,6 +108,22 @@ static void printstructmembertype(Type* ty) {
   printparamtype(ty);
 }
 
+/* static void printlocalvartype(Type* ty) { */
+/*   // structs and unions are just pointers, represented as long 'l' */
+/*   if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) { */
+/*     print("%c", 'l'); */
+/*     return; */
+/*   } */
+
+/*   printparamtype(ty); */
+/* } */
+
+// QBE identifier for a param or local variable
+static void printlocalname(Obj* local) {
+  print("%s.%d", local->name, -local->offset);
+}
+
+
 static int count(void) {
   static int i = 1;
   return i++;
@@ -1920,7 +1936,8 @@ static void emit_text_qbe(Obj *prog) {
     print("$%s (", fn->name);
     for (Obj *var = fn->params; var; var = var->next) {
       printparamtype(var->ty);
-      print(" %%%s", var->name);
+      print(" %%");
+      printlocalname(var);
       if (var->next)
 	print(", ");
     }
@@ -1934,7 +1951,24 @@ static void emit_text_qbe(Obj *prog) {
     current_fn = fn;
 
     // TODO
-    println("# TODO alloca local vars\n");
+    //printf("RPJ params:\n");
+    for (Obj *var = fn->params; var; var = var->next) {
+      var->is_param = true;
+      //printf("         rpj param     0x%lx '%s' offset %d is_local %s is_param %s align %d size %d\n", (long)var, var->name, var->offset, (var->is_local ? "true" : "false"), (var->is_param ? "true" : "false"), var->align, var->ty->size);
+    }
+    //printf("RPJ locals:\n");
+    for (Obj *var = fn->locals; var; var = var->next) {
+      if (var->is_param)
+	continue;
+
+      int align = MAX(4, var->align);
+      print("        %%");
+      printlocalname(var);
+      println(" =l alloc%d %d", align, var->ty->size);
+      //printf("         rpj local var 0x%lx '%s' offset %d is_local %s is_param %s align %d size %d\n", (long)var, var->name, var->offset, (var->is_local ? "true" : "false"), (var->is_param ? "true" : "false"), var->align, var->ty->size);
+    }
+
+    print("\n");
     
     // Emit code
     gen_stmt(fn->body);
@@ -1962,12 +1996,11 @@ void codegen_qbe(Obj *prog, FILE *out) {
     println("#![qbe]  .file %d \"%s\"", files[i]->file_no, files[i]->name);
   print("\n");
 
-  // Not required for QBE - we just use var names
+  // Used to disambiguate homonymous local vars
   assign_lvar_offsets(prog);
 
-  // TODO
+  // Struct and union types used for fn ABI wrangling
   emit_types_qbe(prog);
-  
   emit_data_qbe(prog);
   emit_text_qbe(prog);
 }

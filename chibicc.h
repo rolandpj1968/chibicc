@@ -135,6 +135,7 @@ struct Obj {
   Type *ty;      // Type
   Token *tok;    // representative token
   bool is_local; // local or global/function
+  bool is_param; // param - is_local is also true
   int align;     // alignment
 
   // Local variable
