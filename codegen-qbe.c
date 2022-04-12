@@ -5,7 +5,6 @@
 
 static FILE *output_file;
 static int depth;
-static char *argreg64[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
 static Obj *current_fn;
 static int current_tmp;
 
@@ -190,48 +189,6 @@ static int count(void) {
   return i++;
 }
 
-static void push(void) {
-  println("#  push %%rax");
-  depth++;
-}
-
-static void pop(char *arg) {
-  println("#  pop %s", arg);
-  depth--;
-}
-
-static void pushf(void) {
-  println("#  sub $8, %%rsp");
-  println("#  movsd %%xmm0, (%%rsp)");
-  depth++;
-}
-
-static void popf(int reg) {
-  println("#  movsd (%%rsp), %%xmm%d", reg);
-  println("#  add $8, %%rsp");
-  depth--;
-}
-
-static char *reg_dx(int sz) {
-  switch (sz) {
-  case 1: return "%dl";
-  case 2: return "%dx";
-  case 4: return "%edx";
-  case 8: return "%rdx";
-  }
-  unreachable();
-}
-
-static char *reg_ax(int sz) {
-  switch (sz) {
-  case 1: return "%al";
-  case 2: return "%ax";
-  case 4: return "%eax";
-  case 8: return "%rax";
-  }
-  unreachable();
-}
-
 // Compute the absolute address of a given node.
 // It's an error if a given node does not reside in memory.
 // Return the temporary that the address resides in.
@@ -383,36 +340,8 @@ static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
 }
 
 // Store %rax to an address that the stack top is pointing to.
-static void store_qbe(int from_tmp, int to_tmp, Type *ty) {
-  pop("%rdi");
-
-  switch (ty->kind) {
-  case TY_STRUCT:
-  case TY_UNION:
-    for (int i = 0; i < ty->size; i++) {
-      println("#  mov %d(%%rax), %%r8b", i);
-      println("#  mov %%r8b, %d(%%rdi)", i);
-    }
-    return;
-  case TY_FLOAT:
-    println("#  movss %%xmm0, (%%rdi)");
-    return;
-  case TY_DOUBLE:
-    println("#  movsd %%xmm0, (%%rdi)");
-    return;
-  case TY_LDOUBLE:
-    println("#  fstpt (%%rdi)");
-    return;
-  }
-
-  if (ty->size == 1)
-    println("#  mov %%al, (%%rdi)");
-  else if (ty->size == 2)
-    println("#  mov %%ax, (%%rdi)");
-  else if (ty->size == 4)
-    println("#  mov %%eax, (%%rdi)");
-  else
-    println("#  mov %%rax, (%%rdi)");
+static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
+  println("  store%c %%%d, %%%d", qbe_ext_type(ty), val_tmp, addr_tmp);
 }
 
 static void cmp_zero(Type *ty) {
@@ -439,130 +368,6 @@ static void cmp_zero(Type *ty) {
 }
 
 enum { I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80 };
-
-static int getTypeId(Type *ty) {
-  switch (ty->kind) {
-  case TY_CHAR:
-    return ty->is_unsigned ? U8 : I8;
-  case TY_SHORT:
-    return ty->is_unsigned ? U16 : I16;
-  case TY_INT:
-    return ty->is_unsigned ? U32 : I32;
-  case TY_LONG:
-    return ty->is_unsigned ? U64 : I64;
-  case TY_FLOAT:
-    return F32;
-  case TY_DOUBLE:
-    return F64;
-  case TY_LDOUBLE:
-    return F80;
-  }
-  return U64;
-}
-
-// The table for type casts
-static char i32i8[] = "movsbl %al, %eax";
-static char i32u8[] = "movzbl %al, %eax";
-static char i32i16[] = "movswl %ax, %eax";
-static char i32u16[] = "movzwl %ax, %eax";
-static char i32f32[] = "cvtsi2ssl %eax, %xmm0";
-static char i32i64[] = "movsxd %eax, %rax";
-static char i32f64[] = "cvtsi2sdl %eax, %xmm0";
-static char i32f80[] = "mov %eax, -4(%rsp); fildl -4(%rsp)";
-
-static char u32f32[] = "mov %eax, %eax; cvtsi2ssq %rax, %xmm0";
-static char u32i64[] = "mov %eax, %eax";
-static char u32f64[] = "mov %eax, %eax; cvtsi2sdq %rax, %xmm0";
-static char u32f80[] = "mov %eax, %eax; mov %rax, -8(%rsp); fildll -8(%rsp)";
-
-static char i64f32[] = "cvtsi2ssq %rax, %xmm0";
-static char i64f64[] = "cvtsi2sdq %rax, %xmm0";
-static char i64f80[] = "movq %rax, -8(%rsp); fildll -8(%rsp)";
-
-static char u64f32[] = "cvtsi2ssq %rax, %xmm0";
-static char u64f64[] =
-  "test %rax,%rax; js 1f; pxor %xmm0,%xmm0; cvtsi2sd %rax,%xmm0; jmp 2f; "
-  "1: mov %rax,%rdi; and $1,%eax; pxor %xmm0,%xmm0; shr %rdi; "
-  "or %rax,%rdi; cvtsi2sd %rdi,%xmm0; addsd %xmm0,%xmm0; 2:";
-static char u64f80[] =
-  "mov %rax, -8(%rsp); fildq -8(%rsp); test %rax, %rax; jns 1f;"
-  "mov $1602224128, %eax; mov %eax, -4(%rsp); fadds -4(%rsp); 1:";
-
-static char f32i8[] = "cvttss2sil %xmm0, %eax; movsbl %al, %eax";
-static char f32u8[] = "cvttss2sil %xmm0, %eax; movzbl %al, %eax";
-static char f32i16[] = "cvttss2sil %xmm0, %eax; movswl %ax, %eax";
-static char f32u16[] = "cvttss2sil %xmm0, %eax; movzwl %ax, %eax";
-static char f32i32[] = "cvttss2sil %xmm0, %eax";
-static char f32u32[] = "cvttss2siq %xmm0, %rax";
-static char f32i64[] = "cvttss2siq %xmm0, %rax";
-static char f32u64[] = "cvttss2siq %xmm0, %rax";
-static char f32f64[] = "cvtss2sd %xmm0, %xmm0";
-static char f32f80[] = "movss %xmm0, -4(%rsp); flds -4(%rsp)";
-
-static char f64i8[] = "cvttsd2sil %xmm0, %eax; movsbl %al, %eax";
-static char f64u8[] = "cvttsd2sil %xmm0, %eax; movzbl %al, %eax";
-static char f64i16[] = "cvttsd2sil %xmm0, %eax; movswl %ax, %eax";
-static char f64u16[] = "cvttsd2sil %xmm0, %eax; movzwl %ax, %eax";
-static char f64i32[] = "cvttsd2sil %xmm0, %eax";
-static char f64u32[] = "cvttsd2siq %xmm0, %rax";
-static char f64i64[] = "cvttsd2siq %xmm0, %rax";
-static char f64u64[] = "cvttsd2siq %xmm0, %rax";
-static char f64f32[] = "cvtsd2ss %xmm0, %xmm0";
-static char f64f80[] = "movsd %xmm0, -8(%rsp); fldl -8(%rsp)";
-
-#define FROM_F80_1                                           \
-  "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; " \
-  "mov %ax, -12(%rsp); fldcw -12(%rsp); "
-
-#define FROM_F80_2 " -24(%rsp); fldcw -10(%rsp); "
-
-static char f80i8[] = FROM_F80_1 "fistps" FROM_F80_2 "movsbl -24(%rsp), %eax";
-static char f80u8[] = FROM_F80_1 "fistps" FROM_F80_2 "movzbl -24(%rsp), %eax";
-static char f80i16[] = FROM_F80_1 "fistps" FROM_F80_2 "movzbl -24(%rsp), %eax";
-static char f80u16[] = FROM_F80_1 "fistpl" FROM_F80_2 "movswl -24(%rsp), %eax";
-static char f80i32[] = FROM_F80_1 "fistpl" FROM_F80_2 "mov -24(%rsp), %eax";
-static char f80u32[] = FROM_F80_1 "fistpl" FROM_F80_2 "mov -24(%rsp), %eax";
-static char f80i64[] = FROM_F80_1 "fistpq" FROM_F80_2 "mov -24(%rsp), %rax";
-static char f80u64[] = FROM_F80_1 "fistpq" FROM_F80_2 "mov -24(%rsp), %rax";
-static char f80f32[] = "fstps -8(%rsp); movss -8(%rsp), %xmm0";
-static char f80f64[] = "fstpl -8(%rsp); movsd -8(%rsp), %xmm0";
-
-static char *cast_table[][11] = {
-  // i8   i16     i32     i64     u8     u16     u32     u64     f32     f64     f80  << to
-  //                                                                                         vv from
-  {NULL,  NULL,   NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i8
-  {i32i8, NULL,   NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i16
-  {i32i8, i32i16, NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i32
-  {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   i64f32, i64f64, i64f80}, // i64
-
-  {i32i8, NULL,   NULL,   i32i64, NULL,  NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u8
-  {i32i8, i32i16, NULL,   i32i64, i32u8, NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u16
-  {i32i8, i32i16, NULL,   u32i64, i32u8, i32u16, NULL,   u32i64, u32f32, u32f64, u32f80}, // u32
-  {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   u64f32, u64f64, u64f80}, // u64
-
-  {f32i8, f32i16, f32i32, f32i64, f32u8, f32u16, f32u32, f32u64, NULL,   f32f64, f32f80}, // f32
-  {f64i8, f64i16, f64i32, f64i64, f64u8, f64u16, f64u32, f64u64, f64f32, NULL,   f64f80}, // f64
-  {f80i8, f80i16, f80i32, f80i64, f80u8, f80u16, f80u32, f80u64, f80f32, f80f64, NULL},   // f80
-};
-
-// Wrong way round?
-static char *cast_table_qbe[][11] = {
-  // i8   i16     i32     i64     u8     u16     u32     u64     f32     f64     f80  << to
-  //                                                                                         vv from
-  {NULL,  "extsb",   "extsb",   NULL,   "extsb", i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i8
-  {i32i8, NULL,   NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i16
-  {i32i8, i32i16, NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i32
-  {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   i64f32, i64f64, i64f80}, // i64
-
-  {i32i8, NULL,   NULL,   i32i64, NULL,  NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u8
-  {i32i8, i32i16, NULL,   i32i64, i32u8, NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u16
-  {i32i8, i32i16, NULL,   u32i64, i32u8, i32u16, NULL,   u32i64, u32f32, u32f64, u32f80}, // u32
-  {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   u64f32, u64f64, u64f80}, // u64
-
-  {f32i8, f32i16, f32i32, f32i64, f32u8, f32u16, f32u32, f32u64, NULL,   f32f64, f32f80}, // f32
-  {f64i8, f64i16, f64i32, f64i64, f64u8, f64u16, f64u32, f64u64, f64f32, NULL,   f64f80}, // f64
-  {f80i8, f80i16, f80i32, f80i64, f80u8, f80u16, f80u32, f80u64, f80f32, f80f64, NULL},   // f80
-};
 
 static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
   if (to->kind == TY_VOID)
@@ -627,206 +432,35 @@ static bool has_flonum(Type *ty, int lo, int hi, int offset) {
   return offset < lo || hi <= offset || ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE;
 }
 
-static bool has_flonum1(Type *ty) {
-  return has_flonum(ty, 0, 8, 0);
-}
+// TODO...
+/* static void builtin_alloca(void) { */
+/*   error_tok(node->tok, "alloca builtin not yet supported by RPJ/QBE"); */
+/*   // Align size to 16 bytes. */
+/*   println("#  add $15, %%rdi"); */
+/*   println("#  and $0xfffffff0, %%edi"); */
 
-static bool has_flonum2(Type *ty) {
-  return has_flonum(ty, 8, 16, 0);
-}
+/*   // Shift the temporary area by %rdi. */
+/*   println("#  mov %d(%%rbp), %%rcx", current_fn->alloca_bottom->offset); */
+/*   println("#  sub %%rsp, %%rcx"); */
+/*   println("#  mov %%rsp, %%rax"); */
+/*   println("#  sub %%rdi, %%rsp"); */
+/*   println("#  mov %%rsp, %%rdx"); */
+/*   println("#1:"); */
+/*   println("#  cmp $0, %%rcx"); */
+/*   println("#  je 2f"); */
+/*   println("#  mov (%%rax), %%r8b"); */
+/*   println("#  mov %%r8b, (%%rdx)"); */
+/*   println("#  inc %%rdx"); */
+/*   println("#  inc %%rax"); */
+/*   println("#  dec %%rcx"); */
+/*   println("#  jmp 1b"); */
+/*   println("#2:"); */
 
-static void push_struct(Type *ty) {
-  int sz = align_to(ty->size, 8);
-  println("#  sub $%d, %%rsp", sz);
-  depth += sz / 8;
-
-  for (int i = 0; i < ty->size; i++) {
-    println("#  mov %d(%%rax), %%r10b", i);
-    println("#  mov %%r10b, %d(%%rsp)", i);
-  }
-}
-
-static void push_args2(Node *args, bool first_pass) {
-  if (!args)
-    return;
-  push_args2(args->next, first_pass);
-
-  if ((first_pass && !args->pass_by_stack) || (!first_pass && args->pass_by_stack))
-    return;
-
-  gen_expr_qbe(args);
-
-  switch (args->ty->kind) {
-  case TY_STRUCT:
-  case TY_UNION:
-    push_struct(args->ty);
-    break;
-  case TY_FLOAT:
-  case TY_DOUBLE:
-    pushf();
-    break;
-  case TY_LDOUBLE:
-    println("#  sub $16, %%rsp");
-    println("#  fstpt (%%rsp)");
-    depth += 2;
-    break;
-  default:
-    push();
-  }
-}
-
-// Load function call arguments. Arguments are already evaluated and
-// stored to the stack as local variables. What we need to do in this
-// function is to load them to registers or push them to the stack as
-// specified by the x86-64 psABI. Here is what the spec says:
-//
-// - Up to 6 arguments of integral type are passed using RDI, RSI,
-//   RDX, RCX, R8 and R9.
-//
-// - Up to 8 arguments of floating-point type are passed using XMM0 to
-//   XMM7.
-//
-// - If all registers of an appropriate type are already used, push an
-//   argument to the stack in the right-to-left order.
-//
-// - Each argument passed on the stack takes 8 bytes, and the end of
-//   the argument area must be aligned to a 16 byte boundary.
-//
-// - If a function is variadic, set the number of floating-point type
-//   arguments to RAX.
-static int push_args(Node *node) {
-  int stack = 0, gp = 0, fp = 0;
-
-  // If the return type is a large struct/union, the caller passes
-  // a pointer to a buffer as if it were the first argument.
-  if (node->ret_buffer && node->ty->size > 16)
-    gp++;
-
-  // Load as many arguments to the registers as possible.
-  for (Node *arg = node->args; arg; arg = arg->next) {
-    Type *ty = arg->ty;
-
-    switch (ty->kind) {
-    case TY_STRUCT:
-    case TY_UNION:
-      if (ty->size > 16) {
-        arg->pass_by_stack = true;
-        stack += align_to(ty->size, 8) / 8;
-      } else {
-        bool fp1 = has_flonum1(ty);
-        bool fp2 = has_flonum2(ty);
-
-        if (fp + fp1 + fp2 < FP_MAX && gp + !fp1 + !fp2 < GP_MAX) {
-          fp = fp + fp1 + fp2;
-          gp = gp + !fp1 + !fp2;
-        } else {
-          arg->pass_by_stack = true;
-          stack += align_to(ty->size, 8) / 8;
-        }
-      }
-      break;
-    case TY_FLOAT:
-    case TY_DOUBLE:
-      if (fp++ >= FP_MAX) {
-        arg->pass_by_stack = true;
-        stack++;
-      }
-      break;
-    case TY_LDOUBLE:
-      arg->pass_by_stack = true;
-      stack += 2;
-      break;
-    default:
-      if (gp++ >= GP_MAX) {
-        arg->pass_by_stack = true;
-        stack++;
-      }
-    }
-  }
-
-  if ((depth + stack) % 2 == 1) {
-    println("#  sub $8, %%rsp");
-    depth++;
-    stack++;
-  }
-
-  push_args2(node->args, true);
-  push_args2(node->args, false);
-
-  // If the return type is a large struct/union, the caller passes
-  // a pointer to a buffer as if it were the first argument.
-  if (node->ret_buffer && node->ty->size > 16) {
-    println("#  lea %d(%%rbp), %%rax", node->ret_buffer->offset);
-    push();
-  }
-
-  return stack;
-}
-
-static void copy_ret_buffer(Obj *var) {
-  Type *ty = var->ty;
-  int gp = 0, fp = 0;
-
-  if (has_flonum1(ty)) {
-    assert(ty->size == 4 || 8 <= ty->size);
-    if (ty->size == 4)
-      println("#  movss %%xmm0, %d(%%rbp)", var->offset);
-    else
-      println("#  movsd %%xmm0, %d(%%rbp)", var->offset);
-    fp++;
-  } else {
-    for (int i = 0; i < MIN(8, ty->size); i++) {
-      println("#  mov %%al, %d(%%rbp)", var->offset + i);
-      println("#  shr $8, %%rax");
-    }
-    gp++;
-  }
-
-  if (ty->size > 8) {
-    if (has_flonum2(ty)) {
-      assert(ty->size == 12 || ty->size == 16);
-      if (ty->size == 12)
-        println("#  movss %%xmm%d, %d(%%rbp)", fp, var->offset + 8);
-      else
-        println("#  movsd %%xmm%d, %d(%%rbp)", fp, var->offset + 8);
-    } else {
-      char *reg1 = (gp == 0) ? "%al" : "%dl";
-      char *reg2 = (gp == 0) ? "%rax" : "%rdx";
-      for (int i = 8; i < MIN(16, ty->size); i++) {
-        println("#  mov %s, %d(%%rbp)", reg1, var->offset + i);
-        println("#  shr $8, %s", reg2);
-      }
-    }
-  }
-}
-
-static void builtin_alloca(void) {
-  // Align size to 16 bytes.
-  println("#  add $15, %%rdi");
-  println("#  and $0xfffffff0, %%edi");
-
-  // Shift the temporary area by %rdi.
-  println("#  mov %d(%%rbp), %%rcx", current_fn->alloca_bottom->offset);
-  println("#  sub %%rsp, %%rcx");
-  println("#  mov %%rsp, %%rax");
-  println("#  sub %%rdi, %%rsp");
-  println("#  mov %%rsp, %%rdx");
-  println("#1:");
-  println("#  cmp $0, %%rcx");
-  println("#  je 2f");
-  println("#  mov (%%rax), %%r8b");
-  println("#  mov %%r8b, (%%rdx)");
-  println("#  inc %%rdx");
-  println("#  inc %%rax");
-  println("#  dec %%rcx");
-  println("#  jmp 1b");
-  println("#2:");
-
-  // Move alloca_bottom pointer.
-  println("#  mov %d(%%rbp), %%rax", current_fn->alloca_bottom->offset);
-  println("#  sub %%rdi, %%rax");
-  println("#  mov %%rax, %d(%%rbp)", current_fn->alloca_bottom->offset);
-}
+/*   // Move alloca_bottom pointer. */
+/*   println("#  mov %d(%%rbp), %%rax", current_fn->alloca_bottom->offset); */
+/*   println("#  sub %%rdi, %%rax"); */
+/*   println("#  mov %%rax, %d(%%rbp)", current_fn->alloca_bottom->offset); */
+/* } */
 
 // Generate code for a given node.
 static int gen_expr_qbe(Node *node) {
@@ -1082,7 +716,7 @@ static int gen_expr_qbe(Node *node) {
     return tmp;
   }
   case ND_EXCH: {
-    error_tok(node->tok, "XChg not yet supported by RPJ/QBE");
+    error_tok(node->tok, "xchg not yet supported by RPJ/QBE");
     /* gen_expr_qbe(node->lhs); */
     /* push(); */
     /* gen_expr_qbe(node->rhs); */
@@ -1096,88 +730,36 @@ static int gen_expr_qbe(Node *node) {
 
   switch (node->lhs->ty->kind) {
   case TY_FLOAT:
-  case TY_DOUBLE: {
-    gen_expr_qbe(node->rhs);
-    pushf();
-    gen_expr_qbe(node->lhs);
-    popf(1);
-
-    char *sz = (node->lhs->ty->kind == TY_FLOAT) ? "ss" : "sd";
-
-    switch (node->kind) {
-    case ND_ADD:
-      println("#  add%s %%xmm1, %%xmm0", sz);
-      return tmp;
-    case ND_SUB:
-      println("#  sub%s %%xmm1, %%xmm0", sz);
-      return tmp;
-    case ND_MUL:
-      println("#  mul%s %%xmm1, %%xmm0", sz);
-      return tmp;
-    case ND_DIV:
-      println("#  div%s %%xmm1, %%xmm0", sz);
-      return tmp;
-    case ND_EQ:
-    case ND_NE:
-    case ND_LT:
-    case ND_LE:
-      println("#  ucomi%s %%xmm0, %%xmm1", sz);
-
-      if (node->kind == ND_EQ) {
-        println("#  sete %%al");
-        println("#  setnp %%dl");
-        println("#  and %%dl, %%al");
-      } else if (node->kind == ND_NE) {
-        println("#  setne %%al");
-        println("#  setp %%dl");
-        println("#  or %%dl, %%al");
-      } else if (node->kind == ND_LT) {
-        println("#  seta %%al");
-      } else {
-        println("#  setae %%al");
-      }
-
-      println("#  and $1, %%al");
-      println("#  movzb %%al, %%rax");
-      return tmp;
-    }
-
-    error_tok(node->tok, "invalid expression");
-  }
+  case TY_DOUBLE:
   case TY_LDOUBLE: {
-    gen_expr_qbe(node->lhs);
-    gen_expr_qbe(node->rhs);
+    // Evaluation order?
+    int lhs_tmp = gen_expr_qbe(node->lhs);
+    int rhs_tmp = gen_expr_qbe(node->rhs);
 
     switch (node->kind) {
     case ND_ADD:
-      println("#  faddp");
+      println("  %%%d =%c add %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_SUB:
-      println("#  fsubrp");
+      println("  %%%d =%c sub %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_MUL:
-      println("#  fmulp");
+      println("  %%%d =%c mul %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_DIV:
-      println("#  fdivrp");
+      println("  %%%d =%c div %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_EQ:
+      println("  %%%d =%c ceq%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      return tmp;
     case ND_NE:
+      println("  %%%d =%c cne%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      return tmp;
     case ND_LT:
+      println("  %%%d =%c clt%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      return tmp;
     case ND_LE:
-      println("#  fcomip");
-      println("#  fstp %%st(0)");
-
-      if (node->kind == ND_EQ)
-        println("#  sete %%al");
-      else if (node->kind == ND_NE)
-        println("#  setne %%al");
-      else if (node->kind == ND_LT)
-        println("#  seta %%al");
-      else
-        println("#  setae %%al");
-
-      println("#  movzb %%al, %%rax");
+      println("  %%%d =%c cle%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
       return tmp;
     }
 
@@ -1185,97 +767,60 @@ static int gen_expr_qbe(Node *node) {
   }
   }
 
-  gen_expr_qbe(node->rhs);
-  push();
-  gen_expr_qbe(node->lhs);
-  pop("%rdi");
-
-  char *ax, *di, *dx;
-
-  if (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) {
-    ax = "%rax";
-    di = "%rdi";
-    dx = "%rdx";
-  } else {
-    ax = "%eax";
-    di = "%edi";
-    dx = "%edx";
-  }
+  // Evaluation order?
+  int lhs_tmp = gen_expr_qbe(node->lhs);
+  int rhs_tmp = gen_expr_qbe(node->rhs);
 
   switch (node->kind) {
   case ND_ADD:
-    println("#  add %s, %s", di, ax);
+    println("  %%%d =%c add %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SUB:
-    println("#  sub %s, %s", di, ax);
+    println("  %%%d =%c sub %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_MUL:
-    println("#  imul %s, %s", di, ax);
+    println("  %%%d =%c mul %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_DIV:
+    println("  %%%d =%c %s %%%d, %%%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "udiv" : "div"), lhs_tmp, rhs_tmp);
+    return tmp;
   case ND_MOD:
-    if (node->ty->is_unsigned) {
-      println("#  mov $0, %s", dx);
-      println("#  div %s", di);
-    } else {
-      if (node->lhs->ty->size == 8)
-        println("#  cqo");
-      else
-        println("#  cdq");
-      println("#  idiv %s", di);
-    }
-
-    if (node->kind == ND_MOD)
-      println("#  mov %%rdx, %%rax");
+    println("  %%%d =%c %s %%%d, %%%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "urem" : "rem"), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITAND:
-    println("#  and %s, %s", di, ax);
+    println("  %%%d =%c and %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITOR:
-    println("#  or %s, %s", di, ax);
+    println("  %%%d =%c or %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITXOR:
-    println("#  xor %s, %s", di, ax);
+    println("  %%%d =%c xor %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_EQ:
+    println("  %%%d =%c ceq%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    return tmp;
   case ND_NE:
+    println("  %%%d =%c cle%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    return tmp;
   case ND_LT:
+    println("  %%%d =%c clt%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    return tmp;
   case ND_LE:
-    println("#  cmp %s, %s", di, ax);
-
-    if (node->kind == ND_EQ) {
-      println("#  sete %%al");
-    } else if (node->kind == ND_NE) {
-      println("#  setne %%al");
-    } else if (node->kind == ND_LT) {
-      if (node->lhs->ty->is_unsigned)
-        println("#  setb %%al");
-      else
-        println("#  setl %%al");
-    } else if (node->kind == ND_LE) {
-      if (node->lhs->ty->is_unsigned)
-        println("#  setbe %%al");
-      else
-        println("#  setle %%al");
-    }
-
-    println("#  movzb %%al, %%rax");
+    println("  %%%d =%c cle%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SHL:
-    println("#  mov %%rdi, %%rcx");
-    println("#  shl %%cl, %s", ax);
+    println("  %%%d =%c shl %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SHR:
-    println("#  mov %%rdi, %%rcx");
     if (node->lhs->ty->is_unsigned)
-      println("#  shr %%cl, %s", ax);
+      println("  %%%d =%c shr %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     else
-      println("#  sar %%cl, %s", ax);
+      println("  %%%d =%c sar %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   }
 
   error_tok(node->tok, "invalid expression");
-}
+  }
 
 static void gen_stmt_qbe(Node *node) {
 
@@ -1573,7 +1118,6 @@ static void emit_fn_call_types_in_expr_qbe(Node* node) {
     return;
   case ND_DEREF:
     emit_fn_call_types_in_expr_qbe(node->lhs);
-    load(node->ty);
     return;
   case ND_ADDR:
     emit_fn_call_types_in_addr_qbe(node->lhs);
@@ -1937,8 +1481,7 @@ static void emit_text_qbe(Obj *prog) {
     // main function is equivalent to returning 0, even though the
     // behavior is undefined for the other functions.
     if (strcmp(fn->name, "main") == 0)
-      // TODO
-      println("#  mov $0, %%rax");
+      println("  ret 0");
 
     // Epilogue
     println("}\n");
