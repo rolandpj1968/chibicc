@@ -192,113 +192,92 @@ static int count(void) {
 // Compute the absolute address of a given node.
 // It's an error if a given node does not reside in memory.
 // Return the temporary that the address resides in.
-static int gen_addr(Node *node) {
+static int gen_addr_qbe(Node *node) {
+  int tmp = current_tmp++;
+
   switch (node->kind) {
   case ND_VAR:
-    // Variable-length array, which is always local.
-    if (node->var->ty->kind == TY_VLA) {
-      println("#  mov %d(%%rbp), %%rax", node->var->offset);
-      return 654321;
-    }
-
     // Local variable
     if (node->var->is_local) {
-      println("#  lea %d(%%rbp), %%rax", node->var->offset);
-      return 654321;
-    }
-
-    if (opt_fpic) {
-      // Thread-local variable
-      if (node->var->is_tls) {
-        println("#  data16 lea %s@tlsgd(%%rip), %%rdi", node->var->name);
-        println("#  .value 0x6666");
-        println("#  rex64");
-        println("#  call __tls_get_addr@PLT");
-        return 654321;
-      }
-
-      // Function or global variable
-      println("#  mov %s@GOTPCREL(%%rip), %%rax", node->var->name);
-      return 654321;
+      print("  %%%d =l copy %%", tmp);
+      printlocalname(node->var);
+      print("\n");
+      return tmp;
     }
 
     // Thread-local variable
     if (node->var->is_tls) {
-      println("#  mov %%fs:0, %%rax");
-      println("#  add $%s@tpoff, %%rax", node->var->name);
-      return 654321;
+      error_tok(node->tok, "thread-local variables not yet supported by RPJ/QBE");
+      /* println("#  mov %%fs:0, %%rax"); */
+      /* println("#  add $%s@tpoff, %%rax", node->var->name); */
+      return tmp;
     }
 
-    // Here, we generate an absolute address of a function or a global
-    // variable. Even though they exist at a certain address at runtime,
-    // their addresses are not known at link-time for the following
-    // two reasons.
-    //
-    //  - Address randomization: Executables are loaded to memory as a
-    //    whole but it is not known what address they are loaded to.
-    //    Therefore, at link-time, relative address in the same
-    //    exectuable (i.e. the distance between two functions in the
-    //    same executable) is known, but the absolute address is not
-    //    known.
-    //
-    //  - Dynamic linking: Dynamic shared objects (DSOs) or .so files
-    //    are loaded to memory alongside an executable at runtime and
-    //    linked by the runtime loader in memory. We know nothing
-    //    about addresses of global stuff that may be defined by DSOs
-    //    until the runtime relocation is complete.
-    //
-    // In order to deal with the former case, we use RIP-relative
-    // addressing, denoted by `(%rip)`. For the latter, we obtain an
-    // address of a stuff that may be in a shared object file from the
-    // Global Offset Table using `@GOTPCREL(%rip)` notation.
-
-    // Function
-    if (node->ty->kind == TY_FUNC) {
-      if (node->var->is_definition)
-        println("#  lea %s(%%rip), %%rax", node->var->name);
-      else
-        println("#  mov %s@GOTPCREL(%%rip), %%rax", node->var->name);
-      return 654321;
-    }
-
-    // Global variable
-    println("#  lea %s(%%rip), %%rax", node->var->name);
-    return 654321;
-  case ND_DEREF:
-    gen_expr_qbe(node->lhs);
-    return 654321;
+    // Global var/fn
+    println("  %%%d =l copy $%s", tmp, node->var->name);
+    return tmp;
+  case ND_DEREF: {
+    int addr_tmp = gen_expr_qbe(node->lhs);
+    println("  %%%d =l copy %%%d", tmp, addr_tmp);
+    return tmp;
+  }
   case ND_COMMA:
-    gen_expr_qbe(node->lhs);
-    gen_addr(node->rhs);
-    return 654321;
-  case ND_MEMBER:
-    gen_addr(node->lhs);
-    println("#  add $%d, %%rax", node->member->offset);
-    return 654321;
+    gen_expr_qbe(node->lhs); // value unused
+    int addr_tmp = gen_addr_qbe(node->rhs);
+    println("  %%%d =l copy %%%d", tmp, addr_tmp);
+    return tmp;
+  case ND_MEMBER: {
+    int base_addr_tmp = gen_addr_qbe(node->lhs);
+    println("  %%%d =l add %%%d, %d", tmp, base_addr_tmp, node->member->offset);
+    return tmp;
+  }
   case ND_FUNCALL:
     if (node->ret_buffer) {
-      gen_expr_qbe(node);
-      return 654321;
+      int addr_tmp = gen_expr_qbe(node);
+      println("  %%%d =l copy %%%d", tmp, addr_tmp);
+      return tmp;
     }
     break;
   case ND_ASSIGN:
   case ND_COND:
+    // TODO - this seems dodgy?
     if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
-      gen_expr_qbe(node);
-      return 654321;
+      int addr_tmp = gen_expr_qbe(node);
+      println("  %%%d =l copy %%%d", tmp, addr_tmp);
+      return tmp;
     }
     break;
   case ND_VLA_PTR:
-    println("#  lea %d(%%rbp), %%rax", node->var->offset);
-    return 654321;
+    // TODO - not sure about this
+    error_tok(node->tok, "ND_VLA_PTR not yet supported by RPJ/QBE");
+    /* println("#  lea %d(%%rbp), %%rax", node->var->offset); */
+    return tmp;
   }
 
   error_tok(node->tok, "not an lvalue");
 }
 
-// Load a value from where %rax is pointing to.
+// Load a value
 static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
+  char sign = ty->is_unsigned ? 'u' : 's';
+
   switch (ty->kind) {
+  case TY_BOOL:
+    // TODO check this - byte?
+    println("  %%%d =l loadub %%%d", to_tmp, from_tmp);
+    return;
+  case TY_CHAR:
+    println("  %%%d =l load%cb %%%d", to_tmp, sign, from_tmp);
+    return;
+  case TY_SHORT:
+    println("  %%%d =l load%ch %%%d", to_tmp, sign, from_tmp);
+    return;
+  case TY_INT:
+    println("  %%%d =l load%cw %%%d", to_tmp, sign, from_tmp);
+    return;
+  case TY_LONG:
+    println("  %%%d =l loadd %%%d", to_tmp, from_tmp);
+    return;
   case TY_ARRAY:
   case TY_STRUCT:
   case TY_UNION:
@@ -310,33 +289,21 @@ static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
     // becomes not the array itself but the address of the array.
     // This is where "array is automatically converted to a pointer to
     // the first element of the array in C" occurs.
+    println("  %%%d =l copy %%%d", to_tmp, from_tmp);
     return;
   case TY_FLOAT:
-    println("#  movss (%%rax), %%xmm0");
+    println("  %%%d =l loads %%%d", to_tmp, from_tmp);
     return;
   case TY_DOUBLE:
-    println("#  movsd (%%rax), %%xmm0");
+    println("  %%%d =l loadd %%%d", to_tmp, from_tmp);
     return;
   case TY_LDOUBLE:
-    println("#  fldt (%%rax)");
+    println("  %%%d =l loadd %%%d", to_tmp, from_tmp);
     return;
   }
 
-  char *insn = ty->is_unsigned ? "movz" : "movs";
+  error("BUG: unhandled type in load_qbe() in RPJ/QBE");
 
-  // When we load a char or a short value to a register, we always
-  // extend them to the size of int, so we can assume the lower half of
-  // a register always contains a valid value. The upper half of a
-  // register for char, short and int may contain garbage. When we load
-  // a long value to a register, it simply occupies the entire register.
-  if (ty->size == 1)
-    println("#  %sbl (%%rax), %%eax", insn);
-  else if (ty->size == 2)
-    println("#  %swl (%%rax), %%eax", insn);
-  else if (ty->size == 4)
-    println("#  movsxd (%%rax), %%rax");
-  else
-    println("#  mov (%%rax), %%rax");
 }
 
 // Store %rax to an address that the stack top is pointing to.
@@ -344,62 +311,64 @@ static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
   println("  store%c %%%d, %%%d", qbe_ext_type(ty), val_tmp, addr_tmp);
 }
 
-static void cmp_zero(Type *ty) {
-  switch (ty->kind) {
-  case TY_FLOAT:
-    println("#  xorps %%xmm1, %%xmm1");
-    println("#  ucomiss %%xmm1, %%xmm0");
-    return;
-  case TY_DOUBLE:
-    println("#  xorpd %%xmm1, %%xmm1");
-    println("#  ucomisd %%xmm1, %%xmm0");
-    return;
-  case TY_LDOUBLE:
-    println("#  fldz");
-    println("#  fucomip");
-    println("#  fstp %%st(0)");
+static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
+  char from_base_type = qbe_base_type(from);
+  char to_base_type = qbe_base_type(to);
+  
+  if (to->kind == TY_VOID) {
+    println("  %%%d =l copy 0", to_tmp);
     return;
   }
 
-  if (is_integer(ty) && ty->size <= 4)
-    println("#  cmp $0, %%eax");
-  else
-    println("#  cmp $0, %%rax");
-}
-
-enum { I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80 };
-
-static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
-  if (to->kind == TY_VOID)
+  if (to->kind == from->kind) {
+    println("  %%%d =%c copy %%%d", to_tmp, to_base_type, from_tmp);
     return;
+  }
 
   if (to->kind == TY_BOOL) {
-    // TODO - from fp?
-    println("  %%%d =%c cne%c %%%d, 0", to_tmp, qbe_base_type(from), qbe_base_type(to), from_tmp);
-    cmp_zero(from);
+    println("  %%%d =%c cne%c %%%d, 0", to_tmp, from_base_type, to_base_type, from_tmp);
     return;
   }
 
+  // Integer to integer casts
   if (is_integer(from) && is_integer(to)) {
+
+    if (from->is_unsigned && from->size <= to->size) {
+      println("  %%%d =%c copy %%%d", to_tmp, to_base_type, from_tmp);
+      return;
+    }
+    
     if (from->size < to->size) {
       // We sign/zero extend the 'from' type to the 'to' type
       // TODO - check the C spec here (gcc behaves oddly in some scenarios like casting u16 to i16
       char to_sign = to->is_unsigned ? 'u' : 's';
-      println("  %%%d =%c ext%c%c %%%d", to_tmp, qbe_base_type(to), to_sign, qbe_ext_type(from), from_tmp);
+      println("  %%%d =%c ext%c%c %%%d", to_tmp, to_base_type, to_sign, qbe_ext_type(from), from_tmp);
+      return;
     }
-    else {
-      // from->size >= to->size
-      // We mask the "from" value to the "to" value size
-      long mask = ((long)1 << (to->size * 8)) - 1;
-      println("  %%%d =%c and %%%d, %ld # 0x%lx", to_tmp, qbe_base_type(to), from_tmp, mask, mask);
-    }
+
+    // from->size >= to->size
+    // We mask the "from" value to the "to" value size
+    long mask = ((long)1 << (to->size * 8)) - 1;
+    println("  %%%d =%c and %%%d, %ld # 0x%lx", to_tmp, to_base_type, from_tmp, mask, mask);
     return;
   }
 
-  // Float to int or vice-versa
-  char *from_sign = is_integer(from) ? (from->is_unsigned ? "u" : "s") : "";
-  char *to_sign = is_integer(to) ? (to->is_unsigned ? "u" : "s") : "";
-  println("  %%%d =%c %s%cto%s%c %%%d", to_tmp, qbe_base_type(to), from_sign, qbe_base_type(from), to_sign, qbe_base_type(to), from_tmp);
+  // Numeric casts where at least one of from or to is floating point
+  if (is_numeric(from) && is_numeric(to)) {
+    // Float to int or vice-versa
+    char *from_sign = is_integer(from) ? (from->is_unsigned ? "u" : "s") : "";
+    char *to_sign = is_integer(to) ? (to->is_unsigned ? "u" : "s") : "";
+    println("  %%%d =%c %s%cto%s%c %%%d", to_tmp, to_base_type, from_sign, from_base_type, to_sign, to_base_type, from_tmp);
+    return;
+  }
+
+  // Pointer to long and vice versa - NOP
+  if (from_base_type == 'l' && to_base_type == 'l') {
+    println("  %%%d =l copy %%%d", to_tmp, from_tmp);
+    return;
+  }
+
+  error("BUG: unhandled types in cast_qbe() in RPJ/QBE");
 }
 
 // Structs or unions equal or smaller than 16 bytes are passed
@@ -508,12 +477,12 @@ static int gen_expr_qbe(Node *node) {
     return tmp;
   }
   case ND_VAR: {
-    int addr_tmp = gen_addr(node);
+    int addr_tmp = gen_addr_qbe(node);
     load_qbe(addr_tmp, tmp, node->ty);
     return tmp;
   }
   case ND_MEMBER: {
-    int addr_tmp = gen_addr(node);
+    int addr_tmp = gen_addr_qbe(node);
     load_qbe(addr_tmp, tmp, node->ty);
 
     Member *mem = node->member;
@@ -533,12 +502,12 @@ static int gen_expr_qbe(Node *node) {
     return tmp;
   }
   case ND_ADDR: {
-    int addr_tmp = gen_addr(node->lhs);
+    int addr_tmp = gen_addr_qbe(node->lhs);
     println("  %%%d =l copy %%%d", tmp, addr_tmp);
     return tmp;
   }
   case ND_ASSIGN: {
-    int addr_tmp = gen_addr(node->lhs);
+    int addr_tmp = gen_addr_qbe(node->lhs);
     int val_tmp = gen_expr_qbe(node->rhs);
 
     if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
@@ -584,19 +553,21 @@ static int gen_expr_qbe(Node *node) {
     cast_qbe(val_tmp, node->lhs->ty, tmp, node->ty);
     return tmp;
   }
-  case ND_MEMZERO:
-    error_tok(node->tok, "memzero not yet supported by QBE/RPJ");
-    /* // `rep stosb` is equivalent to `memset(%rdi, %al, %rcx)`. */
-    /* println("#  mov $%d, %%rcx", node->var->ty->size); */
-    /* println("#  lea %d(%%rbp), %%rdi", node->var->offset); */
-    /* println("#  mov $0, %%al"); */
-    /* println("#  rep stosb"); */
+  case ND_MEMZERO: {
+    // TODO also things like small arrays
+    if (node->var->ty->size > 8) {
+      error_tok(node->tok, "memzero not yet properly supported by QBE/RPJ");
+    }
+    print("  store%c 0, %%", qbe_ext_type(node->var->ty));
+    printlocalname(node->var);
+    print("\n");
+    println("  %%%d =l copy 0", tmp);
     return tmp;
+  }
   case ND_COND: {
     // TODO - struct/union copy? Maybe handled by the memcpy SNAFU already?
     int c = count();
     int cond_tmp = gen_expr_qbe(node->cond);
-    //cmp_zero(node->cond->ty);
     println("  jnz %%%d @q.%d.then @q.%d.else", cond_tmp, c, c);
     println("@q.%d.then", c);
     int then_tmp = gen_expr_qbe(node->then);
@@ -610,7 +581,6 @@ static int gen_expr_qbe(Node *node) {
   }
   case ND_NOT: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    //cmp_zero(node->lhs->ty);
     println("  %%%d =%c ceq %%%d", tmp, qbe_base_type(node->ty), val_tmp);
     return tmp;
   }

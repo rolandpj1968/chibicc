@@ -719,6 +719,8 @@ int main(int argc, char **argv) {
   init_macros();
   parse_args(argc, argv);
 
+  printf("Parsed args...\n");
+
   if (opt_cc1) {
     add_default_include_paths(argv[0]);
     cc1();
@@ -732,6 +734,7 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < input_paths.len; i++) {
     char *input = input_paths.data[i];
+    printf("Processing input file: %s\n", input);
 
     if (!strncmp(input, "-l", 2)) {
       strarray_push(&ld_args, input);
