@@ -199,7 +199,7 @@ static int gen_addr_qbe(Node *node) {
   case ND_VAR:
     // Local variable
     if (node->var->is_local) {
-      print("  %%%d =l copy %%", tmp);
+      print("  %%.%d =l copy %%", tmp);
       printlocalname(node->var);
       print("\n");
       return tmp;
@@ -214,27 +214,27 @@ static int gen_addr_qbe(Node *node) {
     }
 
     // Global var/fn
-    println("  %%%d =l copy $%s", tmp, node->var->name);
+    println("  %%.%d =l copy $%s", tmp, node->var->name);
     return tmp;
   case ND_DEREF: {
     int addr_tmp = gen_expr_qbe(node->lhs);
-    println("  %%%d =l copy %%%d", tmp, addr_tmp);
+    println("  %%.%d =l copy %%.%d", tmp, addr_tmp);
     return tmp;
   }
   case ND_COMMA:
     gen_expr_qbe(node->lhs); // value unused
     int addr_tmp = gen_addr_qbe(node->rhs);
-    println("  %%%d =l copy %%%d", tmp, addr_tmp);
+    println("  %%.%d =l copy %%.%d", tmp, addr_tmp);
     return tmp;
   case ND_MEMBER: {
     int base_addr_tmp = gen_addr_qbe(node->lhs);
-    println("  %%%d =l add %%%d, %d", tmp, base_addr_tmp, node->member->offset);
+    println("  %%.%d =l add %%.%d, %d", tmp, base_addr_tmp, node->member->offset);
     return tmp;
   }
   case ND_FUNCALL:
     if (node->ret_buffer) {
       int addr_tmp = gen_expr_qbe(node);
-      println("  %%%d =l copy %%%d", tmp, addr_tmp);
+      println("  %%.%d =l copy %%.%d", tmp, addr_tmp);
       return tmp;
     }
     break;
@@ -243,7 +243,7 @@ static int gen_addr_qbe(Node *node) {
     // TODO - this seems dodgy?
     if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
       int addr_tmp = gen_expr_qbe(node);
-      println("  %%%d =l copy %%%d", tmp, addr_tmp);
+      println("  %%.%d =l copy %%.%d", tmp, addr_tmp);
       return tmp;
     }
     break;
@@ -264,19 +264,19 @@ static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
   switch (ty->kind) {
   case TY_BOOL:
     // TODO check this - byte?
-    println("  %%%d =l loadub %%%d", to_tmp, from_tmp);
+    println("  %%.%d =l loadub %%.%d", to_tmp, from_tmp);
     return;
   case TY_CHAR:
-    println("  %%%d =l load%cb %%%d", to_tmp, sign, from_tmp);
+    println("  %%.%d =l load%cb %%.%d", to_tmp, sign, from_tmp);
     return;
   case TY_SHORT:
-    println("  %%%d =l load%ch %%%d", to_tmp, sign, from_tmp);
+    println("  %%.%d =l load%ch %%.%d", to_tmp, sign, from_tmp);
     return;
   case TY_INT:
-    println("  %%%d =l load%cw %%%d", to_tmp, sign, from_tmp);
+    println("  %%.%d =l load%cw %%.%d", to_tmp, sign, from_tmp);
     return;
   case TY_LONG:
-    println("  %%%d =l loadd %%%d", to_tmp, from_tmp);
+    println("  %%.%d =l loadd %%.%d", to_tmp, from_tmp);
     return;
   case TY_ARRAY:
   case TY_STRUCT:
@@ -289,16 +289,16 @@ static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
     // becomes not the array itself but the address of the array.
     // This is where "array is automatically converted to a pointer to
     // the first element of the array in C" occurs.
-    println("  %%%d =l copy %%%d", to_tmp, from_tmp);
+    println("  %%.%d =l copy %%.%d", to_tmp, from_tmp);
     return;
   case TY_FLOAT:
-    println("  %%%d =l loads %%%d", to_tmp, from_tmp);
+    println("  %%.%d =l loads %%.%d", to_tmp, from_tmp);
     return;
   case TY_DOUBLE:
-    println("  %%%d =l loadd %%%d", to_tmp, from_tmp);
+    println("  %%.%d =l loadd %%.%d", to_tmp, from_tmp);
     return;
   case TY_LDOUBLE:
-    println("  %%%d =l loadd %%%d", to_tmp, from_tmp);
+    println("  %%.%d =l loadd %%.%d", to_tmp, from_tmp);
     return;
   }
 
@@ -308,7 +308,7 @@ static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
 
 // Store %rax to an address that the stack top is pointing to.
 static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
-  println("  store%c %%%d, %%%d", qbe_ext_type(ty), val_tmp, addr_tmp);
+  println("  store%c %%.%d, %%.%d", qbe_ext_type(ty), val_tmp, addr_tmp);
 }
 
 static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
@@ -316,17 +316,17 @@ static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
   char to_base_type = qbe_base_type(to);
   
   if (to->kind == TY_VOID) {
-    println("  %%%d =l copy 0", to_tmp);
+    println("  %%.%d =l copy 0", to_tmp);
     return;
   }
 
   if (to->kind == from->kind) {
-    println("  %%%d =%c copy %%%d", to_tmp, to_base_type, from_tmp);
+    println("  %%.%d =%c copy %%.%d", to_tmp, to_base_type, from_tmp);
     return;
   }
 
   if (to->kind == TY_BOOL) {
-    println("  %%%d =%c cne%c %%%d, 0", to_tmp, from_base_type, to_base_type, from_tmp);
+    println("  %%.%d =%c cne%c %%.%d, 0", to_tmp, from_base_type, to_base_type, from_tmp);
     return;
   }
 
@@ -334,7 +334,7 @@ static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
   if (is_integer(from) && is_integer(to)) {
 
     if (from->is_unsigned && from->size <= to->size) {
-      println("  %%%d =%c copy %%%d", to_tmp, to_base_type, from_tmp);
+      println("  %%.%d =%c copy %%.%d", to_tmp, to_base_type, from_tmp);
       return;
     }
     
@@ -342,14 +342,14 @@ static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
       // We sign/zero extend the 'from' type to the 'to' type
       // TODO - check the C spec here (gcc behaves oddly in some scenarios like casting u16 to i16
       char to_sign = to->is_unsigned ? 'u' : 's';
-      println("  %%%d =%c ext%c%c %%%d", to_tmp, to_base_type, to_sign, qbe_ext_type(from), from_tmp);
+      println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, to_sign, qbe_ext_type(from), from_tmp);
       return;
     }
 
     // from->size >= to->size
     // We mask the "from" value to the "to" value size
     long mask = ((long)1 << (to->size * 8)) - 1;
-    println("  %%%d =%c and %%%d, %ld # 0x%lx", to_tmp, to_base_type, from_tmp, mask, mask);
+    println("  %%.%d =%c and %%.%d, %ld # 0x%lx", to_tmp, to_base_type, from_tmp, mask, mask);
     return;
   }
 
@@ -358,13 +358,13 @@ static void cast_qbe(int from_tmp, Type *from, int to_tmp, Type *to) {
     // Float to int or vice-versa
     char *from_sign = is_integer(from) ? (from->is_unsigned ? "u" : "s") : "";
     char *to_sign = is_integer(to) ? (to->is_unsigned ? "u" : "s") : "";
-    println("  %%%d =%c %s%cto%s%c %%%d", to_tmp, to_base_type, from_sign, from_base_type, to_sign, to_base_type, from_tmp);
+    println("  %%.%d =%c %s%cto%s%c %%.%d", to_tmp, to_base_type, from_sign, from_base_type, to_sign, to_base_type, from_tmp);
     return;
   }
 
   // Pointer to long and vice versa - NOP
   if (from_base_type == 'l' && to_base_type == 'l') {
-    println("  %%%d =l copy %%%d", to_tmp, from_tmp);
+    println("  %%.%d =l copy %%.%d", to_tmp, from_tmp);
     return;
   }
 
@@ -438,23 +438,23 @@ static int gen_expr_qbe(Node *node) {
 
   switch (node->kind) {
   case ND_NULL_EXPR:
-    println("  %%%d =l copy 0", tmp);
+    println("  %%.%d =l copy 0", tmp);
     return tmp;
   case ND_NUM: {
     switch (node->ty->kind) {
     case TY_FLOAT: {
       union { float f32; uint32_t u32; } u = { node->fval };
-      println("  %%%d =s copy %u # %.9g", tmp, u.u32, u.f32);
+      println("  %%.%d =s copy %u # %.9g", tmp, u.u32, u.f32);
       return tmp;
     }
     case TY_DOUBLE: {
       union { double f64; uint64_t u64; } u = { node->fval };
-      println("  %%%d =d copy %lu # %.17g", tmp, u.u64, u.f64);
+      println("  %%.%d =d copy %lu # %.17g", tmp, u.u64, u.f64);
       return tmp;
     }
     case TY_LDOUBLE: {
       union { double f64; uint64_t u64; } u = { node->fval };
-      println("  %%%d =d copy %lu # %.17g reducing long double to double!!!", tmp, u.u64, u.f64);
+      println("  %%.%d =d copy %lu # %.17g reducing long double to double!!!", tmp, u.u64, u.f64);
       return tmp;
       /* union { long double f80; uint64_t u64[2]; } u; */
       /* memset(&u, 0, sizeof(u)); */
@@ -468,12 +468,12 @@ static int gen_expr_qbe(Node *node) {
     }
     }
 
-    println("  %%%d =%c copy %ld", tmp, qbe_base_type(node->ty), node->val);
+    println("  %%.%d =%c copy %ld", tmp, qbe_base_type(node->ty), node->val);
     return tmp;
   }
   case ND_NEG: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    print("  %%%d =%c neg %%%d", tmp, qbe_base_type(node->ty), val_tmp);
+    print("  %%.%d =%c neg %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_VAR: {
@@ -503,7 +503,7 @@ static int gen_expr_qbe(Node *node) {
   }
   case ND_ADDR: {
     int addr_tmp = gen_addr_qbe(node->lhs);
-    println("  %%%d =l copy %%%d", tmp, addr_tmp);
+    println("  %%.%d =l copy %%.%d", tmp, addr_tmp);
     return tmp;
   }
   case ND_ASSIGN: {
@@ -534,18 +534,18 @@ static int gen_expr_qbe(Node *node) {
     }
 
     store_qbe(val_tmp, addr_tmp, node->ty);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_STMT_EXPR:
     for (Node *n = node->body; n; n = n->next)
       gen_stmt_qbe(n);
-    println("  %%%d =%c copy 0", tmp, qbe_base_type(node->ty));
+    println("  %%.%d =%c copy 0", tmp, qbe_base_type(node->ty));
     return tmp;
   case ND_COMMA: {
     gen_expr_qbe(node->lhs);
     int val_tmp = gen_expr_qbe(node->rhs);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_CAST: {
@@ -561,32 +561,32 @@ static int gen_expr_qbe(Node *node) {
     print("  store%c 0, %%", qbe_ext_type(node->var->ty));
     printlocalname(node->var);
     print("\n");
-    println("  %%%d =l copy 0", tmp);
+    println("  %%.%d =l copy 0", tmp);
     return tmp;
   }
   case ND_COND: {
     // TODO - struct/union copy? Maybe handled by the memcpy SNAFU already?
     int c = count();
     int cond_tmp = gen_expr_qbe(node->cond);
-    println("  jnz %%%d @q.%d.then @q.%d.else", cond_tmp, c, c);
+    println("  jnz %%.%d @q.%d.then @q.%d.else", cond_tmp, c, c);
     println("@q.%d.then", c);
     int then_tmp = gen_expr_qbe(node->then);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), then_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), then_tmp);
     println("  jmp @q.%d.end", c);
     println("@q.%d.else", c);
     int else_tmp = gen_expr_qbe(node->els);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), else_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), else_tmp);
     println("@q.%d.end", c);
     return tmp;
   }
   case ND_NOT: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    println("  %%%d =%c ceq %%%d", tmp, qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c ceq %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_BITNOT: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    println(" %%%d =%c xor %%%d, -1", tmp, qbe_base_type(node->ty), val_tmp);
+    println(" %%.%d =%c xor %%.%d, -1", tmp, qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_LOGAND: {
@@ -594,11 +594,11 @@ static int gen_expr_qbe(Node *node) {
     int lhs_tmp = gen_expr_qbe(node->lhs);
     println("  jnz @and.%d.false @q.%d.true", c, c);
     println("@and.%d.true", c);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), lhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
     println("@and.%d.false", c);
     int rhs_tmp = gen_expr_qbe(node->rhs);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), rhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), rhs_tmp);
     println("@and.%d.end", c);
     return tmp;
   }
@@ -607,11 +607,11 @@ static int gen_expr_qbe(Node *node) {
     int lhs_tmp = gen_expr_qbe(node->lhs);
     println("  jnz @and.%d.true @q.%d.false", c, c);
     println("@and.%d.true", c);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), lhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
     println("@and.%d.false", c);
     int rhs_tmp = gen_expr_qbe(node->rhs);
-    println("  %%%d =%c copy %%%d", tmp, qbe_base_type(node->ty), rhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), rhs_tmp);
     println("@and.%d.end", c);
     return tmp;
   }
@@ -640,21 +640,21 @@ static int gen_expr_qbe(Node *node) {
 
     if (node->ty->kind == TY_VOID) {
       // probably not necessary, but...
-      println("  %%%d =l copy 0", tmp);
+      println("  %%.%d =l copy 0", tmp);
       print("  ");
     }
     else {
-      print("  %%%d =", tmp);
+      print("  %%.%d =", tmp);
       printparamtype(node->ty);
       print(" ");
     }
 
     // TODO remove fn_addr_tmp for most calls - ugh! Maybe QBE will do this for us?
-    print("call %%%d(", fn_addr_tmp);
+    print("call %%.%d(", fn_addr_tmp);
     
     for (Node *arg = node->args; arg; arg = arg->next) {
       printparamtype(arg->ty);
-      print(" %%%d,", arg->val_tmp);
+      print(" %%.%d,", arg->val_tmp);
     }
     println(")");
 
@@ -708,28 +708,28 @@ static int gen_expr_qbe(Node *node) {
 
     switch (node->kind) {
     case ND_ADD:
-      println("  %%%d =%c add %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c add %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_SUB:
-      println("  %%%d =%c sub %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c sub %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_MUL:
-      println("  %%%d =%c mul %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c mul %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_DIV:
-      println("  %%%d =%c div %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c div %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_EQ:
-      println("  %%%d =%c ceq%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c ceq%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_NE:
-      println("  %%%d =%c cne%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c cne%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_LT:
-      println("  %%%d =%c clt%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c clt%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
       return tmp;
     case ND_LE:
-      println("  %%%d =%c cle%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c cle%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
       return tmp;
     }
 
@@ -743,49 +743,49 @@ static int gen_expr_qbe(Node *node) {
 
   switch (node->kind) {
   case ND_ADD:
-    println("  %%%d =%c add %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c add %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SUB:
-    println("  %%%d =%c sub %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c sub %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_MUL:
-    println("  %%%d =%c mul %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c mul %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_DIV:
-    println("  %%%d =%c %s %%%d, %%%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "udiv" : "div"), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c %s %%.%d, %%.%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "udiv" : "div"), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_MOD:
-    println("  %%%d =%c %s %%%d, %%%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "urem" : "rem"), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c %s %%.%d, %%.%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "urem" : "rem"), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITAND:
-    println("  %%%d =%c and %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c and %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITOR:
-    println("  %%%d =%c or %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c or %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITXOR:
-    println("  %%%d =%c xor %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c xor %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_EQ:
-    println("  %%%d =%c ceq%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c ceq%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_NE:
-    println("  %%%d =%c cle%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c cle%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_LT:
-    println("  %%%d =%c clt%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c clt%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_LE:
-    println("  %%%d =%c cle%c %%%d, %%%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c cle%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SHL:
-    println("  %%%d =%c shl %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c shl %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SHR:
     if (node->lhs->ty->is_unsigned)
-      println("  %%%d =%c shr %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c shr %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     else
-      println("  %%%d =%c sar %%%d, %%%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c sar %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
     return tmp;
   }
 
@@ -798,7 +798,7 @@ static void gen_stmt_qbe(Node *node) {
   case ND_IF: {
     int c = count();
     int cond_tmp = gen_expr_qbe(node->cond);
-    println("  jnz %%%d @if.%d.then @if.%d.else", cond_tmp, c, c);
+    println("  jnz %%.%d @if.%d.then @if.%d.else", cond_tmp, c, c);
     println("@if.%d.then", c);
     gen_stmt_qbe(node->then);
     println("  jmp @if.%d.fi", c);
@@ -816,7 +816,7 @@ static void gen_stmt_qbe(Node *node) {
     println("@for.%d.condition", c);
     if (node->cond) {
       int cond_tmp = gen_expr_qbe(node->cond);
-      println("  jnz %%%d @for.%d.body @for.%d.break", cond_tmp, c, c);
+      println("  jnz %%.%d @for.%d.body @for.%d.break", cond_tmp, c, c);
     }
     println("@for.%d.body", c);
     gen_stmt_qbe(node->then);
@@ -834,7 +834,7 @@ static void gen_stmt_qbe(Node *node) {
     gen_stmt_qbe(node->then);
     println("@do.%d.continue", c);
     int cond_tmp = gen_expr_qbe(node->cond);
-    println("  jnz %%%d @do.%d.body @do.%d.break", cond_tmp, c, c);
+    println("  jnz %%.%d @do.%d.body @do.%d.break", cond_tmp, c, c);
     println("@do.%d.break", c);
     return;
   }
@@ -889,7 +889,7 @@ static void gen_stmt_qbe(Node *node) {
     if (node->lhs) {
       // TODO - will struct/union by val work? Actually maybe... we're just copying the pointer from another var; it's copying structs/unions by val that will be tricky
       int val_tmp = gen_expr_qbe(node->lhs);
-      println("  ret %%%d", val_tmp);
+      println("  ret %%.%d", val_tmp);
       return;
     }
 
