@@ -96,7 +96,7 @@ static Obj *current_fn;
 static Node *gotos;
 static Node *labels;
 
-// Current "goto" and "continue" jump targets.
+// Current "break" and "continue" jump targets.
 static char *brk_label;
 static char *cont_label;
 

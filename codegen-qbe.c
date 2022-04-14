@@ -805,7 +805,6 @@ static void gen_stmt_qbe(Node *node) {
   }
   case ND_FOR: {
     int c = count();
-    // for break/continue we probs want to set node->c - better than cont_label/break_label?
     if (node->init)
       gen_stmt_qbe(node->init);
     println("@for.%d.condition", c);
@@ -816,21 +815,28 @@ static void gen_stmt_qbe(Node *node) {
     println("@for.%d.body", c);
     gen_stmt_qbe(node->then);
     println("@for.%d.continue", c);
+    // chibicc label
+    println("@label.%s", node->cont_label);
     if (node->inc)
       gen_expr_qbe(node->inc);
     println("  jmp @for.%d.condition", c);
     println("@for.%d.break", c);
+    // chibicc label
+    println("@label.%s", node->brk_label);
     return;
   }
   case ND_DO: {
     int c = count();
-    // for break/continue we probs want to set node->c - better than cont_label/break_label?
     println("@do.%d.body", c);
     gen_stmt_qbe(node->then);
     println("@do.%d.continue", c);
+    // chibicc label
+    println("@label.%s", node->cont_label);
     int cond_tmp = gen_expr_qbe(node->cond);
     println("  jnz %%.%d, @do.%d.body, @do.%d.break", cond_tmp, c, c);
     println("@do.%d.break", c);
+    // chibicc label
+    println("@label.%s", node->brk_label);
     return;
   }
   case ND_SWITCH:
@@ -870,11 +876,15 @@ static void gen_stmt_qbe(Node *node) {
     for (Node *n = node->body; n; n = n->next)
       gen_stmt_qbe(n);
     return;
-  case ND_GOTO:
+  case ND_GOTO: {
+    int c = count();
     println("  jmp @label.%s\n", node->unique_label);
+    // Add a dummy label to keep QBE happy
+    println("@.goto.%d", c);
+  }
     return;
   case ND_GOTO_EXPR:
-    error_tok(node->tok, "computed goto not supported by QBE");
+    error_tok(node->tok, "computed goto not yet supported by RPJ/QBE");
     return;
   case ND_LABEL:
     println("\n@label.%s", node->unique_label);
