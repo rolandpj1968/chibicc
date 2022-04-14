@@ -839,37 +839,40 @@ static void gen_stmt_qbe(Node *node) {
     println("@label.%s", node->brk_label);
     return;
   }
-  case ND_SWITCH:
-    error_tok(node->tok, "switch not yet supported by QBE/RPJ");
-    gen_expr_qbe(node->cond);
+  case ND_SWITCH: {
+    //error_tok(node->tok, "switch not yet supported by QBE/RPJ");
+    int val_tmp = gen_expr_qbe(node->cond);
+    char base_type = qbe_base_type(node->cond->ty);
 
     for (Node *n = node->case_next; n; n = n->case_next) {
-      char *ax = (node->cond->ty->size == 8) ? "%rax" : "%eax";
-      char *di = (node->cond->ty->size == 8) ? "%rdi" : "%edi";
-
+      int cmp_tmp = current_tmp++;
+      
       if (n->begin == n->end) {
-        println("#  cmp $%ld, %s", n->begin, ax);
-        println("#  je %s", n->label);
-        continue;
+	println("  %%.%d =w ceq%c %%.%d, %ld", cmp_tmp, base_type, val_tmp, n->begin);
       }
-
-      // [GNU] Case ranges
-      println("#  mov %s, %s", ax, di);
-      println("#  sub $%ld, %s", n->begin, di);
-      println("#  cmp $%ld, %s", n->end - n->begin, di);
-      println("#  jbe %s", n->label);
+      else {
+	// [GNU] Case ranges
+	int sub_tmp = current_tmp++;
+	println("  %%.%d =%c sub %ld, %%.%d", sub_tmp, base_type, n->begin, val_tmp);
+	println("  %%.%d =w csle%c %%.%d, %ld", cmp_tmp, base_type, sub_tmp, n->end - n->begin);
+      }
+      println("  jnz %%.%d, @label.%s, @switch.%d.next", cmp_tmp, n->label, cmp_tmp);
+      println("@switch.%d.next", cmp_tmp);
+      
     }
 
     if (node->default_case)
-      println("#  jmp %s", node->default_case->label);
-
-    println("#  jmp %s", node->brk_label);
+      println("  jmp @label.%s", node->default_case->label);
+    else
+      println("  jmp @label.%s", node->brk_label);
+    
     gen_stmt_qbe(node->then);
-    println("#%s:", node->brk_label);
+    println("@label.%s", node->brk_label);
     return;
+  }
   case ND_CASE:
-    error_tok(node->tok, "case not yet supported by QBE/RPJ");
-    println("#%s:", node->label);
+    //error_tok(node->tok, "case not yet supported by QBE/RPJ");
+    println("@label.%s", node->label);
     gen_stmt_qbe(node->lhs);
     return;
   case ND_BLOCK:
@@ -878,7 +881,7 @@ static void gen_stmt_qbe(Node *node) {
     return;
   case ND_GOTO: {
     int c = count();
-    println("  jmp @label.%s\n", node->unique_label);
+    println("  jmp @label.%s", node->unique_label);
     // Add a dummy label to keep QBE happy
     println("@.goto.%d", c);
   }
