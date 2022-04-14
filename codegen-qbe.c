@@ -276,6 +276,7 @@ static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
     println("  %%.%d =l load%cw %%.%d", to_tmp, sign, from_tmp);
     return;
   case TY_LONG:
+  case TY_PTR:
     println("  %%.%d =l loadd %%.%d", to_tmp, from_tmp);
     return;
   case TY_ARRAY:
@@ -302,7 +303,7 @@ static void load_qbe(int from_tmp, int to_tmp, Type *ty) {
     return;
   }
 
-  error("BUG: unhandled type in load_qbe() in RPJ/QBE");
+  error("BUG: unhandled type %d in load_qbe() in RPJ/QBE", ty->kind);
 
 }
 
@@ -1331,7 +1332,7 @@ static void emit_data_qbe(Obj *prog) {
 
     // Common symbol
     if (opt_fcommon && var->is_tentative) {
-      println("section \".comm\"");
+      println("# section \".comm\"");
       println("data $%s = align %d { z %d }\n", var->name, align, var->ty->size);
       continue;
     }
@@ -1339,10 +1340,10 @@ static void emit_data_qbe(Obj *prog) {
     // .data or .tdata
     if (var->init_data) {
       if (var->is_tls) {
-        println("section \".tdata\" \"\\\"awT\\\",@progbits\"");
+        println("# section \".tdata\" \"\\\"awT\\\",@progbits\"");
       }
       else {
-	println("section \".data\"");
+	println("# section \".data\"");
       }
 
       print("data $%s = { ", var->name);
@@ -1373,10 +1374,10 @@ static void emit_data_qbe(Obj *prog) {
     
     // .bss or .tbss
     if (var->is_tls) {
-      println("section \".tbss\" \"\\\"awT\\\",@nobits\"");
+      println("# section \".tbss\" \"\\\"awT\\\",@nobits\"");
     }
     else {
-      println("section \".bss\"");
+      println("# section \".bss\"");
     }
 
     println("data $%s = { z %d }\n", var->name, var->ty->size);
@@ -1396,10 +1397,10 @@ static void emit_text_qbe(Obj *prog) {
     if (!fn->is_static)
       println("export");
 
-    println("section \".text\"");
+    println("# section \".text\"");
     print("function ");
     
-    if (fn->ty->return_ty != TY_VOID) {
+    if (fn->ty->return_ty->kind != TY_VOID) {
       printparamtype(fn->ty->return_ty);
       print(" ");
     }
@@ -1417,18 +1418,15 @@ static void emit_text_qbe(Obj *prog) {
     }
     println(") {");
 
-    println("@start\n");
+    println("@.start\n");
     
     current_fn = fn;
     current_tmp = 1;
 
-    // TODO
-    //printf("RPJ params:\n");
     for (Obj *var = fn->params; var; var = var->next) {
       var->is_param = true;
-      //printf("         rpj param     0x%lx '%s' offset %d is_local %s is_param %s align %d size %d\n", (long)var, var->name, var->offset, (var->is_local ? "true" : "false"), (var->is_param ? "true" : "false"), var->align, var->ty->size);
     }
-    //printf("RPJ locals:\n");
+
     for (Obj *var = fn->locals; var; var = var->next) {
       if (var->is_param)
 	continue;
@@ -1437,7 +1435,6 @@ static void emit_text_qbe(Obj *prog) {
       print("  %%");
       printlocalname(var);
       println(" =l alloc%d %d", align, var->ty->size);
-      //printf("         rpj local var 0x%lx '%s' offset %d is_local %s is_param %s align %d size %d\n", (long)var, var->name, var->offset, (var->is_local ? "true" : "false"), (var->is_param ? "true" : "false"), var->align, var->ty->size);
     }
 
     print("\n");
@@ -1450,12 +1447,13 @@ static void emit_text_qbe(Obj *prog) {
     // a special rule for the main function. Reaching the end of the
     // main function is equivalent to returning 0, even though the
     // behavior is undefined for the other functions.
-    if (strcmp(fn->name, "main") == 0)
-      println("  ret 0");
+    //
+    // For QBE we always generate a final return just to make QBE happy
+    println("\n@.final.ret");
+    println("  ret%s", (fn->ty->return_ty->kind == TY_VOID ? "" : " 0"));
 
     // Epilogue
     println("}\n");
-    //println("#.L.return.%s:", fn->name);
   }
 }
 
