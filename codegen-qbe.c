@@ -362,7 +362,7 @@ static int cast_qbe(int from_tmp, Type *from, Type *to) {
     return from_tmp;
   }
 
-  error("BUG: unhandled types in cast_qbe() in RPJ/QBE");
+  error("BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
 }
 
 // Structs or unions equal or smaller than 16 bytes are passed
@@ -552,7 +552,7 @@ static int gen_expr_qbe(Node *node) {
     // TODO - struct/union copy? Maybe handled by the memcpy SNAFU already?
     int c = count();
     int cond_tmp = gen_expr_qbe(node->cond);
-    println("  jnz %%.%d @q.%d.then @q.%d.else", cond_tmp, c, c);
+    println("  jnz %%.%d, @q.%d.then, @q.%d.else", cond_tmp, c, c);
     println("@q.%d.then", c);
     int then_tmp = gen_expr_qbe(node->then);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), then_tmp);
@@ -576,7 +576,7 @@ static int gen_expr_qbe(Node *node) {
   case ND_LOGAND: {
     int c = count();
     int lhs_tmp = gen_expr_qbe(node->lhs);
-    println("  jnz @and.%d.false @q.%d.true", c, c);
+    println("  jnz %%%d, @and.%d.false, @q.%d.true", lhs_tmp, c, c);
     println("@and.%d.true", c);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
@@ -589,7 +589,7 @@ static int gen_expr_qbe(Node *node) {
   case ND_LOGOR: {
     int c = count();
     int lhs_tmp = gen_expr_qbe(node->lhs);
-    println("  jnz @and.%d.true @q.%d.false", c, c);
+    println("  jnz %%%d, @and.%d.true, @q.%d.false", lhs_tmp, c, c);
     println("@and.%d.true", c);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
@@ -690,38 +690,40 @@ static int gen_expr_qbe(Node *node) {
   }
   }
 
+  char base_type = qbe_base_type(node->ty);
+  char lhs_base_type = qbe_base_type(node->lhs->ty);
+
   switch (node->lhs->ty->kind) {
   case TY_FLOAT:
   case TY_DOUBLE:
   case TY_LDOUBLE: {
-    // Evaluation order?
     int lhs_tmp = gen_expr_qbe(node->lhs);
     int rhs_tmp = gen_expr_qbe(node->rhs);
 
     switch (node->kind) {
     case ND_ADD:
-      println("  %%.%d =%c add %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c add %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
       return tmp;
     case ND_SUB:
-      println("  %%.%d =%c sub %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c sub %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
       return tmp;
     case ND_MUL:
-      println("  %%.%d =%c mul %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c mul %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
       return tmp;
     case ND_DIV:
-      println("  %%.%d =%c div %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c div %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
       return tmp;
     case ND_EQ:
-      println("  %%.%d =%c ceq%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c ceq%c %%.%d, %%.%d", tmp, base_type, lhs_base_type, lhs_tmp, rhs_tmp);
       return tmp;
     case ND_NE:
-      println("  %%.%d =%c cne%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c cne%c %%.%d, %%.%d", tmp, base_type, lhs_base_type, lhs_tmp, rhs_tmp);
       return tmp;
     case ND_LT:
-      println("  %%.%d =%c clt%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c clt%c %%.%d, %%.%d", tmp, base_type, lhs_base_type, lhs_tmp, rhs_tmp);
       return tmp;
     case ND_LE:
-      println("  %%.%d =%c cle%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c cle%c %%.%d, %%.%d", tmp, base_type, lhs_base_type, lhs_tmp, rhs_tmp);
       return tmp;
     }
 
@@ -729,55 +731,56 @@ static int gen_expr_qbe(Node *node) {
   }
   }
 
-  // Evaluation order?
   int lhs_tmp = gen_expr_qbe(node->lhs);
   int rhs_tmp = gen_expr_qbe(node->rhs);
 
+  char sign = node->lhs->ty->is_unsigned ? 'u' : 's';
+
   switch (node->kind) {
   case ND_ADD:
-    println("  %%.%d =%c add %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c add %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SUB:
-    println("  %%.%d =%c sub %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c sub %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_MUL:
-    println("  %%.%d =%c mul %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c mul %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_DIV:
-    println("  %%.%d =%c %s %%.%d, %%.%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "udiv" : "div"), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c %s %%.%d, %%.%d", tmp, base_type, (node->ty->is_unsigned ? "udiv" : "div"), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_MOD:
-    println("  %%.%d =%c %s %%.%d, %%.%d", tmp, qbe_base_type(node->ty), (node->ty->is_unsigned ? "urem" : "rem"), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c %s %%.%d, %%.%d", tmp, base_type, (node->ty->is_unsigned ? "urem" : "rem"), lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITAND:
-    println("  %%.%d =%c and %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c and %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITOR:
-    println("  %%.%d =%c or %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c or %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_BITXOR:
-    println("  %%.%d =%c xor %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c xor %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_EQ:
-    println("  %%.%d =%c ceq%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c ceq%c %%.%d, %%.%d", tmp, base_type, lhs_base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_NE:
-    println("  %%.%d =%c cle%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c cne%c %%.%d, %%.%d", tmp, base_type, lhs_base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_LT:
-    println("  %%.%d =%c clt%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c c%clt%c %%.%d, %%.%d", tmp, base_type, sign, lhs_base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_LE:
-    println("  %%.%d =%c cle%c %%.%d, %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->lhs->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c c%cle%c %%.%d, %%.%d", tmp, base_type, sign, lhs_base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SHL:
-    println("  %%.%d =%c shl %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+    println("  %%.%d =%c shl %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   case ND_SHR:
     if (node->lhs->ty->is_unsigned)
-      println("  %%.%d =%c shr %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c shr %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     else
-      println("  %%.%d =%c sar %%.%d, %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp, rhs_tmp);
+      println("  %%.%d =%c sar %%.%d, %%.%d", tmp, base_type, lhs_tmp, rhs_tmp);
     return tmp;
   }
 
@@ -790,7 +793,7 @@ static void gen_stmt_qbe(Node *node) {
   case ND_IF: {
     int c = count();
     int cond_tmp = gen_expr_qbe(node->cond);
-    println("  jnz %%.%d @if.%d.then @if.%d.else", cond_tmp, c, c);
+    println("  jnz %%.%d, @if.%d.then, @if.%d.else", cond_tmp, c, c);
     println("@if.%d.then", c);
     gen_stmt_qbe(node->then);
     println("  jmp @if.%d.fi", c);
@@ -808,7 +811,7 @@ static void gen_stmt_qbe(Node *node) {
     println("@for.%d.condition", c);
     if (node->cond) {
       int cond_tmp = gen_expr_qbe(node->cond);
-      println("  jnz %%.%d @for.%d.body @for.%d.break", cond_tmp, c, c);
+      println("  jnz %%.%d, @for.%d.body, @for.%d.break", cond_tmp, c, c);
     }
     println("@for.%d.body", c);
     gen_stmt_qbe(node->then);
@@ -826,7 +829,7 @@ static void gen_stmt_qbe(Node *node) {
     gen_stmt_qbe(node->then);
     println("@do.%d.continue", c);
     int cond_tmp = gen_expr_qbe(node->cond);
-    println("  jnz %%.%d @do.%d.body @do.%d.break", cond_tmp, c, c);
+    println("  jnz %%.%d, @do.%d.body, @do.%d.break", cond_tmp, c, c);
     println("@do.%d.break", c);
     return;
   }
@@ -877,16 +880,22 @@ static void gen_stmt_qbe(Node *node) {
     println("\n@label.%s", node->unique_label);
     gen_stmt_qbe(node->lhs);
     return;
-  case ND_RETURN:
+  case ND_RETURN: {
+    int c = count();
     if (node->lhs) {
       // TODO - will struct/union by val work? Actually maybe... we're just copying the pointer from another var; it's copying structs/unions by val that will be tricky
       int val_tmp = gen_expr_qbe(node->lhs);
       println("  ret %%.%d", val_tmp);
+      // Add a dummy label to keep QBE happy
+      println("@.ret.%d", c);
       return;
     }
 
     println("  ret");
+    // Add a dummy label to keep QBE happy
+    println("@.ret.%d", c);
     return;
+  }
   case ND_EXPR_STMT:
     gen_expr_qbe(node->lhs);
     return;
@@ -1380,6 +1389,12 @@ static void emit_text_qbe(Obj *prog) {
     if (!fn->is_function || !fn->is_definition)
       continue;
 
+    // Chibicc generates these but not needed for QBE
+    // TODO - remove from chibicc
+    if (!strcmp(fn->name, "__va_arg_fp") || !strcmp(fn->name, "__va_arg_gp") || !strcmp(fn->name, "__va_arg_mem")) {
+      continue;
+    }
+    
     // No code is emitted for "static inline" functions
     // if no one is referencing them.
     if (!fn->is_live)
@@ -1423,6 +1438,7 @@ static void emit_text_qbe(Obj *prog) {
 	continue;
 
       // Chibicc generates these but not needed for QBE
+      // TODO - remove from chibicc
       if (!strcmp(var->name, "__alloca_size__") || !strcmp(var->name, "__va_area__")) {
 	continue;
       }
