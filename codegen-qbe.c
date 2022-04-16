@@ -300,6 +300,46 @@ static int load_qbe(int from_tmp, Type *ty) {
 }
 
 static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
+  if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+    // Do a memcpy rather than a member-wise copy cos it copes with unions
+    // In this case val_tmp is the address of the struct/union to be copied
+    int offset = 0;
+    if (ty->align >= 8) {
+      while (offset+8 <= ty->size) {
+	int from_addr_tmp = current_tmp++;
+	println("  %%.%d =l add %%.%d, %d", from_addr_tmp, val_tmp, offset);
+	int mem_val_tmp = current_tmp++;
+	println("  %%.%d =l loadl %%.%d", mem_val_tmp, from_addr_tmp);
+	int to_addr_tmp = current_tmp++;
+	println("  %%.%d =l add %%.%d, %d", to_addr_tmp, addr_tmp, offset);
+	println("  storel %%.%d, %%.%d", mem_val_tmp, to_addr_tmp);
+	offset += 8;
+      }
+    }
+    if (ty->align >= 4) {
+      while (offset+4 <= ty->size) {
+	int from_addr_tmp = current_tmp++;
+	println("  %%.%d =l add %%.%d, %d", from_addr_tmp, val_tmp, offset);
+	int mem_val_tmp = current_tmp++;
+	println("  %%.%d =w loaduw %%.%d", mem_val_tmp, from_addr_tmp);
+	int to_addr_tmp = current_tmp++;
+	println("  %%.%d =l add %%.%d, %d", to_addr_tmp, addr_tmp, offset);
+	println("  storew %%.%d, %%.%d", mem_val_tmp, to_addr_tmp);
+	offset += 4;
+      }
+    }
+    while (offset+1 <= ty->size) {
+      int from_addr_tmp = current_tmp++;
+      println("  %%.%d =l add %%.%d, %d", from_addr_tmp, val_tmp, offset);
+      int mem_val_tmp = current_tmp++;
+      println("  %%.%d =w loadub %%.%d", mem_val_tmp, from_addr_tmp);
+      int to_addr_tmp = current_tmp++;
+      println("  %%.%d =l add %%.%d, %d", to_addr_tmp, addr_tmp, offset);
+      println("  storeb %%.%d, %%.%d", mem_val_tmp, to_addr_tmp);
+      offset += 1;
+    }
+    return;
+  }
   println("  store%c %%.%d, %%.%d", qbe_ext_type(ty), val_tmp, addr_tmp);
 }
 
@@ -538,14 +578,36 @@ static int gen_expr_qbe(Node *node) {
     return cast_qbe(val_tmp, node->lhs->ty, node->ty);
   }
   case ND_MEMZERO: {
-    // TODO also things like small arrays
-    if (node->var->ty->size > 8) {
-      fprintf(stderr, "WARNING: memzero not yet properly supported by QBE/RPJ\n");
-      //error_tok(node->tok, "memzero not yet properly supported by QBE/RPJ");
-    }
-    print("  store%c 0, %%", qbe_ext_type(node->var->ty));
+    int base_addr_tmp = current_tmp++;
+    print("  %%.%d =l copy %%", base_addr_tmp);
+    // TODO - is this always a local var?
     printlocalname(node->var);
     print("\n");
+    
+    int offset = 0;
+    if (node->var->ty->align >= 8) {
+      while (offset+8 <= node->var->ty->size) {
+	int addr_tmp = current_tmp++;
+	println("  %%.%d =l add %%.%d, %d", addr_tmp, base_addr_tmp, offset);
+	println("  storel 0, %%.%d", addr_tmp);
+	offset += 8;
+      }
+    }
+    if (node->var->ty->align >= 4) {
+      while (offset+4 <= node->var->ty->size) {
+	int addr_tmp = current_tmp++;
+	println("  %%.%d =l add %%.%d, %d", addr_tmp, base_addr_tmp, offset);
+	println("  storew 0, %%.%d", addr_tmp);
+	offset += 4;
+      }
+    }
+    while (offset+1 <= node->var->ty->size) {
+      int addr_tmp = current_tmp++;
+      println("  %%.%d =l add %%.%d, %d", addr_tmp, base_addr_tmp, offset);
+      println("  storeb 0, %%.%d", addr_tmp);
+      offset += 1;
+    }
+    // TODO - is this needed or correct?
     println("  %%.%d =l copy 0", tmp);
     return tmp;
   }
