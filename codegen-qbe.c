@@ -367,12 +367,6 @@ static int cast_qbe(int from_tmp, Type *from, Type *to) {
 
   // Integer to integer casts
   if (is_integer(from) && is_integer(to)) {
-
-    if (from->is_unsigned && from->size <= to->size) {
-      println("  %%.%d =%c copy %%.%d", to_tmp, to_base_type, from_tmp);
-      return to_tmp;
-    }
-    
     if (from->size < to->size) {
       // We sign/zero extend the 'from' type to the 'to' type
       // TODO - check the C spec here (gcc behaves oddly in some scenarios like casting u16 to i16
