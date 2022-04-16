@@ -257,16 +257,16 @@ static int load_qbe(int from_tmp, Type *ty) {
   switch (ty->kind) {
   case TY_BOOL:
     // TODO check this - byte?
-    println("  %%.%d =l loadub %%.%d", to_tmp, from_tmp);
+    println("  %%.%d =w loadub %%.%d", to_tmp, from_tmp);
     return to_tmp;
   case TY_CHAR:
-    println("  %%.%d =l load%cb %%.%d", to_tmp, sign, from_tmp);
+    println("  %%.%d =w load%cb %%.%d", to_tmp, sign, from_tmp);
     return to_tmp;
   case TY_SHORT:
-    println("  %%.%d =l load%ch %%.%d", to_tmp, sign, from_tmp);
+    println("  %%.%d =w load%ch %%.%d", to_tmp, sign, from_tmp);
     return to_tmp;
   case TY_INT:
-    println("  %%.%d =l load%cw %%.%d", to_tmp, sign, from_tmp);
+    println("  %%.%d =w load%cw %%.%d", to_tmp, sign, from_tmp);
     return to_tmp;
   case TY_LONG:
   case TY_PTR:
@@ -285,13 +285,13 @@ static int load_qbe(int from_tmp, Type *ty) {
     // the first element of the array in C" occurs.
     return from_tmp;
   case TY_FLOAT:
-    println("  %%.%d =l loads %%.%d", to_tmp, from_tmp);
+    println("  %%.%d =s loads %%.%d", to_tmp, from_tmp);
     return to_tmp;
   case TY_DOUBLE:
-    println("  %%.%d =l loadd %%.%d", to_tmp, from_tmp);
+    println("  %%.%d =d loadd %%.%d", to_tmp, from_tmp);
     return to_tmp;
   case TY_LDOUBLE:
-    println("  %%.%d =l loadd %%.%d", to_tmp, from_tmp);
+    println("  %%.%d =d loadd %%.%d", to_tmp, from_tmp);
     return to_tmp;
   }
 
@@ -437,17 +437,17 @@ static int gen_expr_qbe(Node *node) {
     switch (node->ty->kind) {
     case TY_FLOAT: {
       union { float f32; uint32_t u32; } u = { node->fval };
-      println("  %%.%d =s copy %u # %.9g", tmp, u.u32, u.f32);
+      println("  %%.%d =s copy %u # (float) %.9g", tmp, u.u32, u.f32);
       return tmp;
     }
     case TY_DOUBLE: {
       union { double f64; uint64_t u64; } u = { node->fval };
-      println("  %%.%d =d copy %lu # %.17g", tmp, u.u64, u.f64);
+      println("  %%.%d =d copy %lu # (double) %.17lg", tmp, u.u64, u.f64);
       return tmp;
     }
     case TY_LDOUBLE: {
       union { double f64; uint64_t u64; } u = { node->fval };
-      println("  %%.%d =d copy %lu # %.17g reducing long double to double!!!", tmp, u.u64, u.f64);
+      println("  %%.%d =d copy %lu # (long double) %.17g reducing long double to double!!!", tmp, u.u64, u.f64);
       return tmp;
       /* union { long double f80; uint64_t u64[2]; } u; */
       /* memset(&u, 0, sizeof(u)); */
@@ -540,7 +540,8 @@ static int gen_expr_qbe(Node *node) {
   case ND_MEMZERO: {
     // TODO also things like small arrays
     if (node->var->ty->size > 8) {
-      error_tok(node->tok, "memzero not yet properly supported by QBE/RPJ");
+      fprintf(stderr, "WARNING: memzero not yet properly supported by QBE/RPJ\n");
+      //error_tok(node->tok, "memzero not yet properly supported by QBE/RPJ");
     }
     print("  store%c 0, %%", qbe_ext_type(node->var->ty));
     printlocalname(node->var);
@@ -614,8 +615,6 @@ static int gen_expr_qbe(Node *node) {
     }
 
     // Generate the args
-    // TODO - is this the right order - I see the original code generates in the opposite order which will be inverse side-effecty
-    // Apparently it's unspecified, so fine...
     for (Node *arg = node->args; arg; arg = arg->next) {
       arg->val_tmp = gen_expr_qbe(arg);
     }
@@ -643,8 +642,21 @@ static int gen_expr_qbe(Node *node) {
       print("%%.%d", fn_addr_tmp);
 
     print("(");
-    
+
+    // TODO - chibicc seems to have no param types for variadic fn which is wrong
+    // This works for printf for now
+    Type* func_ty = node->func_ty;
+    bool is_variadic = func_ty->is_variadic;
+    Type* param_ty = node->func_ty->params;
     for (Node *arg = node->args; arg; arg = arg->next) {
+      if (is_variadic) {
+	if (param_ty) {
+	  param_ty = param_ty->next;
+	  is_variadic = false;
+	  print(" ...,");
+	}
+      }
+      print(" ");
       printparamtype(arg->ty);
       print(" %%.%d,", arg->val_tmp);
     }
