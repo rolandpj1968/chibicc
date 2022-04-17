@@ -699,15 +699,15 @@ static int gen_expr_qbe(Node *node) {
 
     print("(");
 
-    // TODO - chibicc seems to have no param types for variadic fn which is wrong
-    // This works for printf for now
     Type* func_ty = node->func_ty;
     bool is_variadic = func_ty->is_variadic;
-    Type* param_ty = node->func_ty->params;
+    Type* param_ty = func_ty->params;
     for (Node *arg = node->args; arg; arg = arg->next) {
       if (is_variadic) {
 	if (param_ty) {
 	  param_ty = param_ty->next;
+	}
+	else {
 	  is_variadic = false;
 	  print(" ...,");
 	}
@@ -1475,7 +1475,7 @@ static void emit_text_qbe(Obj *prog) {
     if (!strcmp(fn->name, "__va_arg_fp") || !strcmp(fn->name, "__va_arg_gp") || !strcmp(fn->name, "__va_arg_mem")) {
       continue;
     }
-    
+
     // No code is emitted for "static inline" functions
     // if no one is referencing them.
     if (!fn->is_live)
