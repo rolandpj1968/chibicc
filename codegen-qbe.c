@@ -521,13 +521,6 @@ static int gen_expr_qbe(Node *node) {
     return tmp;
   }
   case ND_VAR: {
-    if (node->var->is_param) {
-      print("  %%.%d =%c copy %%", tmp, qbe_base_type(node->ty));
-      printlocalname(node->var);
-      print("\n");
-      return tmp;
-    }
-
     int addr_tmp = gen_addr_qbe(node);
     return load_qbe(addr_tmp, node->ty);
   }
@@ -578,16 +571,6 @@ static int gen_expr_qbe(Node *node) {
       /* return tmp; */
     }
 
-    if (node->lhs->kind == ND_VAR) {
-      println("      # ND_ASSIGN - LHS is a var!!!!!\n");
-    }
-    if (node->lhs->kind == ND_VAR && node->lhs->var->is_param) {
-      print("  %%");
-      printlocalname(node->lhs->var);
-      println(" =%c copy %%.%d\n", qbe_base_type(node->ty), val_tmp);
-      return val_tmp;
-    }
-    
     int addr_tmp = gen_addr_qbe(node->lhs);
     store_qbe(val_tmp, addr_tmp, node->ty);
     return val_tmp;
@@ -1531,7 +1514,7 @@ static void emit_text_qbe(Obj *prog) {
     print("$%s (", fn->name);
     for (Obj *var = fn->params; var; var = var->next) {
       printparamtype(var->ty);
-      print(" %%");
+      print(" %%.param");
       printlocalname(var);
       if (var->next)
 	print(", ");
@@ -1551,9 +1534,6 @@ static void emit_text_qbe(Obj *prog) {
     }
 
     for (Obj *var = fn->locals; var; var = var->next) {
-      if (var->is_param)
-	continue;
-
       // Chibicc generates these but not needed for QBE
       // TODO - remove from chibicc
       if (!strcmp(var->name, "__alloca_size__") || !strcmp(var->name, "__va_area__")) {
@@ -1564,6 +1544,15 @@ static void emit_text_qbe(Obj *prog) {
       print("  %%");
       printlocalname(var);
       println(" =l alloc%d %d", align, var->ty->size);
+      if (var->is_param) {
+      	// Copy to the stack local to allow &param
+	print("  store%c %%.param", qbe_base_type(var->ty));
+	printlocalname(var);
+	print(", ");
+	print("%%");
+	printlocalname(var);
+	print("\n");
+      }
     }
 
     print("\n");
