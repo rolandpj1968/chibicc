@@ -266,6 +266,7 @@ static int load_qbe(int from_tmp, Type *ty) {
     println("  %%.%d =w load%ch %%.%d", to_tmp, sign, from_tmp);
     return to_tmp;
   case TY_INT:
+  case TY_ENUM:
     println("  %%.%d =w load%cw %%.%d", to_tmp, sign, from_tmp);
     return to_tmp;
   case TY_LONG:
@@ -344,7 +345,9 @@ static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
 }
 
 static bool is_integer_like(Type* ty) {
-  return is_integer(ty) || ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA;
+  return is_integer(ty)
+    || ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA
+    || ty->kind == TY_FUNC;
 }
 
 // return tmp with the cast value
@@ -636,7 +639,7 @@ static int gen_expr_qbe(Node *node) {
   }
   case ND_NOT: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    println("  %%.%d =%c ceq %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c ceq%c %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_BITNOT: {
@@ -647,7 +650,7 @@ static int gen_expr_qbe(Node *node) {
   case ND_LOGAND: {
     int c = count();
     int lhs_tmp = gen_expr_qbe(node->lhs);
-    println("  jnz %%%d, @and.%d.false, @q.%d.true", lhs_tmp, c, c);
+    println("  jnz %%.%d, @and.%d.false, @q.%d.true", lhs_tmp, c, c);
     println("@and.%d.true", c);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
@@ -660,7 +663,7 @@ static int gen_expr_qbe(Node *node) {
   case ND_LOGOR: {
     int c = count();
     int lhs_tmp = gen_expr_qbe(node->lhs);
-    println("  jnz %%%d, @and.%d.true, @q.%d.false", lhs_tmp, c, c);
+    println("  jnz %%.%d, @and.%d.true, @q.%d.false", lhs_tmp, c, c);
     println("@and.%d.true", c);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
