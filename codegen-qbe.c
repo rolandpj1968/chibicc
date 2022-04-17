@@ -521,6 +521,13 @@ static int gen_expr_qbe(Node *node) {
     return tmp;
   }
   case ND_VAR: {
+    if (node->var->is_param) {
+      print("  %%.%d =%c copy %%", tmp, qbe_base_type(node->ty));
+      printlocalname(node->var);
+      print("\n");
+      return tmp;
+    }
+
     int addr_tmp = gen_addr_qbe(node);
     return load_qbe(addr_tmp, node->ty);
   }
