@@ -180,7 +180,7 @@ static void printstructmembertype(Type* ty) {
 
 // QBE identifier for a param or local variable
 static void printlocalname(Obj* local) {
-  print("%s.%d", local->name, -local->offset);
+  print(".%s.%d", local->name, -local->offset);
 }
 
 
@@ -553,7 +553,6 @@ static int gen_expr_qbe(Node *node) {
   case ND_ADDR:
     return gen_addr_qbe(node->lhs);
   case ND_ASSIGN: {
-    int addr_tmp = gen_addr_qbe(node->lhs);
     int val_tmp = gen_expr_qbe(node->rhs);
 
     if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
@@ -579,6 +578,17 @@ static int gen_expr_qbe(Node *node) {
       /* return tmp; */
     }
 
+    if (node->lhs->kind == ND_VAR) {
+      println("      # ND_ASSIGN - LHS is a var!!!!!\n");
+    }
+    if (node->lhs->kind == ND_VAR && node->lhs->var->is_param) {
+      print("  %%");
+      printlocalname(node->lhs->var);
+      println(" =%c copy %%.%d\n", qbe_base_type(node->ty), val_tmp);
+      return val_tmp;
+    }
+    
+    int addr_tmp = gen_addr_qbe(node->lhs);
     store_qbe(val_tmp, addr_tmp, node->ty);
     return val_tmp;
   }
@@ -646,7 +656,7 @@ static int gen_expr_qbe(Node *node) {
   }
   case ND_NOT: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    println("  %%.%d =%c ceq%c %%.%d", tmp, qbe_base_type(node->ty), qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c ceq%c %%.%d, 0", tmp, qbe_base_type(node->ty), qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_BITNOT: {
@@ -657,7 +667,7 @@ static int gen_expr_qbe(Node *node) {
   case ND_LOGAND: {
     int c = count();
     int lhs_tmp = gen_expr_qbe(node->lhs);
-    println("  jnz %%.%d, @and.%d.false, @q.%d.true", lhs_tmp, c, c);
+    println("  jnz %%.%d, @and.%d.false, @and.%d.true", lhs_tmp, c, c);
     println("@and.%d.true", c);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
@@ -670,14 +680,14 @@ static int gen_expr_qbe(Node *node) {
   case ND_LOGOR: {
     int c = count();
     int lhs_tmp = gen_expr_qbe(node->lhs);
-    println("  jnz %%.%d, @and.%d.true, @q.%d.false", lhs_tmp, c, c);
-    println("@and.%d.true", c);
+    println("  jnz %%.%d, @or.%d.true, @or.%d.false", lhs_tmp, c, c);
+    println("@or.%d.true", c);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
-    println("  jmp @and.%d.end", c);
-    println("@and.%d.false", c);
+    println("  jmp @or.%d.end", c);
+    println("@or.%d.false", c);
     int rhs_tmp = gen_expr_qbe(node->rhs);
     println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), rhs_tmp);
-    println("@and.%d.end", c);
+    println("@or.%d.end", c);
     return tmp;
   }
   case ND_FUNCALL: {
@@ -709,9 +719,7 @@ static int gen_expr_qbe(Node *node) {
       print("  ");
     }
     else {
-      print("  %%.%d =", tmp);
-      printparamtype(node->ty);
-      print(" ");
+      print("  %%.%d =%c  ", tmp, qbe_base_type(node->ty));
     }
 
     // TODO remove fn_addr_tmp for most calls - ugh! Maybe QBE will do this for us?
@@ -742,6 +750,11 @@ static int gen_expr_qbe(Node *node) {
     }
     println(")");
 
+    if (node->ty->kind == TY_VOID) {
+      // This is required for assert() compilation.
+      println("  %%.%d =%c copy 0", tmp, qbe_base_type(node->ty));
+    }
+    
     return tmp;
   }
   case ND_LABEL_VAL:
@@ -1512,8 +1525,7 @@ static void emit_text_qbe(Obj *prog) {
     print("function ");
     
     if (fn->ty->return_ty->kind != TY_VOID) {
-      printparamtype(fn->ty->return_ty);
-      print(" ");
+      print("%c ", qbe_base_type(fn->ty->return_ty));
     }
     
     print("$%s (", fn->name);
