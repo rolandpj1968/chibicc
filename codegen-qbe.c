@@ -343,12 +343,13 @@ static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
   println("  store%c %%.%d, %%.%d", qbe_ext_type(ty), val_tmp, addr_tmp);
 }
 
+static bool is_integer_like(Type* ty) {
+  return is_integer(ty) || ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA;
+}
+
 // return tmp with the cast value
 static int cast_qbe(int from_tmp, Type *from, Type *to) {
   int to_tmp = current_tmp++;
-  
-  char from_base_type = qbe_base_type(from);
-  char to_base_type = qbe_base_type(to);
   
   if (to->kind == TY_VOID) {
     // Is this necessary?
@@ -360,18 +361,29 @@ static int cast_qbe(int from_tmp, Type *from, Type *to) {
     return from_tmp;
   }
 
+  char from_base_type = qbe_base_type(from);
+  char to_base_type = qbe_base_type(to);
+  
   if (to->kind == TY_BOOL) {
     println("  %%.%d =%c cne%c %%.%d, 0", to_tmp, from_base_type, to_base_type, from_tmp);
     return to_tmp;
   }
 
-  // Integer to integer casts
-  if (is_integer(from) && is_integer(to)) {
+  bool is_from_integer_like = is_integer_like(from);
+  bool is_to_integer_like = is_integer_like(to);
+
+  // Integer to integer casts or integer to/from ptr
+  if (is_from_integer_like && is_to_integer_like) {
+    
+    // Same size - nop
+    if (from_base_type == to_base_type) {
+      return from_tmp;
+    }
+
     if (from->size < to->size) {
       // We sign/zero extend the 'from' type to the 'to' type
-      // TODO - check the C spec here (gcc behaves oddly in some scenarios like casting u16 to i16
-      char to_sign = to->is_unsigned ? 'u' : 's';
-      println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, to_sign, qbe_ext_type(from), from_tmp);
+      char from_sign = from->is_unsigned ? 'u' : 's';
+      println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, from_sign, qbe_ext_type(from), from_tmp);
       return to_tmp;
     }
 
@@ -391,11 +403,13 @@ static int cast_qbe(int from_tmp, Type *from, Type *to) {
     return to_tmp;
   }
 
-  // Pointer to long and vice versa - NOP
-  if (from_base_type == 'l' && to_base_type == 'l') {
-    return from_tmp;
-  }
-
+  // Int to pointer - mainly for (t*)0
+  // TODO probs need to do this more broadly - and use sign?
+  /* if (from_base_type == 'w' && to_base_type == 'l') { */
+  /*   println("  %%.%d =l extuw %%.%d", to_tmp, from_tmp); */
+  /*   return to_tmp; */
+  /* } */
+  
   error("BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
 }
 
@@ -500,7 +514,7 @@ static int gen_expr_qbe(Node *node) {
   }
   case ND_NEG: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    print("  %%.%d =%c neg %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c neg %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
     return tmp;
   }
   case ND_VAR: {
