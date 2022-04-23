@@ -8,3 +8,10 @@
 /chibicc
 /test/*.exe
 /stage2
+**/*.ssa
+**/*.s
+**/*.err
+**/*.out
+**/*.txt
+**/*.exe
+**/*.qbe
