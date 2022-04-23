@@ -892,7 +892,6 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
       var->align = attr->align;
 
     if (equal(tok, "=")) {
-      warn_tok(tok, "RPJ got an = is this our lvar_initializer");
       Node *expr = lvar_initializer(&tok, tok->next, var);
       cur = cur->next = new_unary(ND_EXPR_STMT, expr, tok);
     }
@@ -1203,7 +1202,6 @@ static void struct_initializer2(Token **rest, Token *tok, Initializer *init, Mem
 }
 
 static void union_initializer(Token **rest, Token *tok, Initializer *init) {
-  warn_tok(tok, "                 union_initializer(...)");
   // Unlike structs, union initializers take only one initializer,
   // and that initializes the first union member by default.
   // You can initialize other member using a designated initializer.
@@ -1269,8 +1267,8 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
       return;
     }
 
-    // A struct can be initialized with another struct. E.g.
-    // `struct T x = y;` where y is a variable of type `struct T`.
+    // A union can be initialized with another union. E.g.
+    // `union T x = y;` where y is a variable of type `union T`.
     // Handle that case first.
     Node *expr = assign(rest, tok);
     add_type(expr);
@@ -1309,9 +1307,7 @@ static Type *copy_struct_type(Type *ty) {
 }
 
 static Initializer *initializer(Token **rest, Token *tok, Type *ty, Type **new_ty) {
-  warn_tok(tok, "                      initializer(...) calling new_initializer...");
   Initializer *init = new_initializer(ty, true);
-  warn_tok(tok, "                      initializer(...) calling initializer2...");
   initializer2(rest, tok, init);
 
   if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->is_flexible) {
@@ -1357,9 +1353,7 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token
     return node;
   }
 
-  warn_tok(tok, "RPJ create_lvar_init maybe struct without init... ty->kind is %d, init->expr %p\n", ty->kind, init->expr);
   if (ty->kind == TY_STRUCT && !init->expr) {
-    warn_tok(tok, " ... RPJ ---------> struct without init->expr\n");
     Node *node = new_node(ND_NULL_EXPR, tok);
 
     for (Member *mem = ty->members; mem; mem = mem->next) {
@@ -1370,9 +1364,7 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token
     return node;
   }
 
-  warn_tok(tok, "RPJ create_lvar_init maybe union...\n");
   if (ty->kind == TY_UNION && !init->expr) {
-    warn_tok(tok, " ... RPJ ---------> union which I think is bogus...\n");
     Member *mem = init->mem ? init->mem : ty->members;
     InitDesg desg2 = {desg, 0, mem};
     return create_lvar_init(init->children[mem->idx], mem->ty, &desg2, tok);
@@ -1382,7 +1374,6 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token
     return new_node(ND_NULL_EXPR, tok);
 
   Node *lhs = init_desg_expr(desg, tok);
-  warn_tok(tok, "... RPJ creating ND_ASSIGN...\n");
   return new_binary(ND_ASSIGN, lhs, init->expr, tok);
 }
 
@@ -1397,9 +1388,7 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token
 //   x[1][0] = 8;
 //   x[1][1] = 9;
 static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
-  warn_tok(tok, "lvar_initializer(...) calling initializer(...)");
   Initializer *init = initializer(rest, tok, var->ty, &var->ty);
-  warn_tok(tok, "               init->expr is %p from initializer(...)", init->expr);
   InitDesg desg = {NULL, 0, NULL, var};
 
   // If a partial initializer list is given, the standard requires
@@ -1409,7 +1398,6 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   Node *lhs = new_node(ND_MEMZERO, tok);
   lhs->var = var;
 
-  warn_tok(tok, "lvar_initializer(...) calling create_lvar_init(...)");
   Node *rhs = create_lvar_init(init, var->ty, &desg, tok);
   return new_binary(ND_COMMA, lhs, rhs, tok);
 }
