@@ -17,6 +17,7 @@ void g(void) {
 
 union u h(int i) {
     struct s v = {};
+    return v.m1;
 }
 
 int main(void) {

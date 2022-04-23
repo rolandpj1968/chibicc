@@ -452,14 +452,19 @@ static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
       return to_tmp;
     }
 
-    // from->size >= to->size
-    /* // We mask the "from" value to the "to" value size */
-    /* long mask = ((long)1 << (to->size * 8)) - 1; */
-    /* println("  %%.%d =%c and %%.%d, %ld # 0x%lx", to_tmp, to_base_type, from_tmp, mask, mask); */
-    // We sign/zero extend the 'to' type to the 'to' base type
+    // from->size >= to->size but not both 'l'/64-bit
+
+    if (from->size >= 4 && to->size == 4) {
+      // We mask the "from" value to the "to" value size (w)
+      long mask = ((long)1 << (to->size * 8)) - 1;
+      println("  %%.%d =w and %%.%d, %ld # 0x%lx", to_tmp, from_tmp, mask, mask);
+      return to_tmp;
+    }
+
+    // To-size smaller than a 'w', so sign/zero extend the 'to' type to the 'to' size (w)
     char to_sign = to->is_unsigned ? 'u' : 's';
     println("  # rpj from->size %d >= to->size %d - to_sign is %c\n", from->size, to->size, to_sign);
-    println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, to_sign, qbe_ext_type(node->tok, to), from_tmp);
+    println("  %%.%d =w ext%c%c %%.%d", to_tmp, to_sign, qbe_ext_type(node->tok, to), from_tmp);
     return to_tmp;
   }
 
@@ -473,6 +478,8 @@ static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
   }
   
   error_tok(node->tok, "BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
+  /* println("  # BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind); */
+  /* return to_tmp; */
 }
 
 // Structs or unions equal or smaller than 16 bytes are passed
