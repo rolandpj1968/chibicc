@@ -477,9 +477,9 @@ static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
     return to_tmp;
   }
   
-  error_tok(node->tok, "BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
-  /* println("  # BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind); */
-  /* return to_tmp; */
+  // error_tok(node->tok, "BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
+  println("  # BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
+  return to_tmp;
 }
 
 // Structs or unions equal or smaller than 16 bytes are passed
@@ -568,7 +568,9 @@ static int gen_expr_qbe(Node *node) {
   case ND_ADDR:
     return gen_addr_qbe(node->lhs);
   case ND_ASSIGN: {
+    println("  # ND_ASSIGN - type is %d, rhs is node type %d, rhs type is %d\n", node->ty->kind, node->rhs->kind, node->rhs->ty->kind);
     int val_tmp = gen_expr_qbe(node->rhs);
+    println("  # ... ND_ASSIGN - type is %d, val in %d\n", node->ty->kind, val_tmp);
 
     if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
       error_tok(node->tok, "bitfield not yet supported by QBE/RPJ");
@@ -588,7 +590,9 @@ static int gen_expr_qbe(Node *node) {
     gen_expr_qbe(node->lhs);
     return gen_expr_qbe(node->rhs);
   case ND_CAST: {
+    println("  # cast node - from %d to %d", node->lhs->ty->kind, node->ty->kind);
     int val_tmp = gen_expr_qbe(node->lhs);
+    println("  # ... cast node - from %d to %d - doing cast", node->lhs->ty->kind, node->ty->kind);
     return cast_qbe(node, val_tmp, node->lhs->ty, node->ty);
   }
   case ND_MEMZERO: {
@@ -686,6 +690,8 @@ static int gen_expr_qbe(Node *node) {
       return tmp;
     }
 
+    println("  # Function call - return type is %d", node->ty->kind);
+
     // Generate a tmp for each arg
     for (Node *arg = node->args; arg; arg = arg->next) {
       arg->val_tmp = current_tmp++;
@@ -745,6 +751,7 @@ static int gen_expr_qbe(Node *node) {
       fprintf(stderr, "...done dummy void val creation for assert???\n");
     }
     
+    println("  # ... function call - return type is %d in tmp %d", node->ty->kind, tmp);
     return tmp;
   }
   case ND_LABEL_VAL:
@@ -1524,9 +1531,16 @@ static void emit_text_qbe(Obj *prog) {
     }
 
     for (Obj *var = fn->locals; var; var = var->next) {
+      
       // Chibicc generates these but not needed for QBE
       // TODO - remove from chibicc
       if (!strcmp(var->name, "__alloca_size__") || !strcmp(var->name, "__va_area__")) {
+	continue;
+      }
+      
+      // Chibicc generates empty-name locals for function calls with
+      // struct/union return type. We don't need these here either.
+      if (var->name == 0 || var->name[0] == 0) {
 	continue;
       }
 
