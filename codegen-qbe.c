@@ -149,8 +149,8 @@ static void print_param_type_qbe(Token* tok, Type* ty) {
 static char qbe_base_type(Token* tok, Type* ty) {
   switch (ty->kind) {
   case TY_VOID:
-    error_tok(tok, "Invalid type void");
-    return '!';
+    // For void expressions (<assert.h>)
+    return 'l';
     
   case TY_BOOL:
   case TY_CHAR:
@@ -412,9 +412,8 @@ static bool is_integer_like(Type* ty) {
 static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
   int to_tmp = current_tmp++;
   
-  //println("  # RPJ - casting from type %d to %d", from->kind, to->kind);
-    
   if (to->kind == TY_VOID) {
+    // For void expressions (<assert.h>)
     println("  %%.%d =l copy 0", to_tmp);
     return to_tmp;
   }
