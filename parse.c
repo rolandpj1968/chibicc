@@ -2700,12 +2700,9 @@ static Type *struct_decl(Token **rest, Token *tok) {
       mem->bit_offset = bits % (sz * 8);
       bits += mem->bit_width;
     } else {
-      //printf("Not a bitfield: struct name %.*s, bits is %d, mem->align is %d\n", ty->name_pos->len, ty->name_pos->loc, bits, mem->align);
-      printf("Not a bitfield: bits is %d, mem->align is %d, is_packed = %d\n", bits, mem->align, ty->is_packed);
       if (!ty->is_packed)
         bits = align_to(bits, mem->align * 8);
       mem->offset = bits / 8;
-      printf("   mem->offset = %d\n", mem->offset);
       bits += mem->ty->size * 8;
     }
 
@@ -3018,7 +3015,6 @@ static Node *primary(Token **rest, Token *tok) {
   }
 
   if (equal(tok, "sizeof")) {
-    printf("             sizeof...\n");
     Node *node = unary(rest, tok->next);
     add_type(node);
     if (node->ty->kind == TY_VLA)

@@ -19,8 +19,6 @@ int main() {
 
   printf("u8 v_u8 = %d: (u8)v_u8 = %d, (i8)v_u8 = %d, (u16)v_u8 = %d, (i16)v_u8 = %d\n", v_u8, (u8)v_u8, (i8)v_u8, (u16)v_u8, (i16)v_u8);
 
-  printf("\n");
-  
   v_u16 = 257;
 
   printf("u16 v_u16 = %d: (u8)v_u16 = %d, (i8)v_u16 = %d, (u16)v_u16 = %d, (i16)v_u16 = %d\n", v_u16, (u8)v_u16, (i8)v_u16, (u16)v_u16, (i16)v_u16);

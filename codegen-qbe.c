@@ -184,11 +184,15 @@ static char qbe_base_type(Token* tok, Type* ty) {
 // Tok for error msg only
 static char qbe_ext_type(Token* tok, Type* ty) {
   switch (ty->kind) {
+  case TY_BOOL:
   case TY_CHAR:
+    return 'b';
+    
   case TY_SHORT:
+    return 'h';
+    
   case TY_INT:
   case TY_ENUM:
-  case TY_BOOL:
     return 'w';
     
   case TY_FLOAT:
@@ -408,12 +412,14 @@ static bool is_integer_like(Type* ty) {
 static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
   int to_tmp = current_tmp++;
   
+  println("  # RPJ - casting from type %d to %d", from->kind, to->kind);
+    
   if (to->kind == TY_VOID) {
     println("  %%.%d =l copy 0", to_tmp);
     return to_tmp;
   }
 
-  if (to->kind == from->kind) {
+  if (from->kind == to->kind && from->is_unsigned == to->is_unsigned) {
     return from_tmp;
   }
 
@@ -430,23 +436,30 @@ static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
 
   // Integer to integer casts or integer to/from ptr
   if (is_from_integer_like && is_to_integer_like) {
+
+    println("  # RPJ - integer-like casting from type %d to %d", from->kind, to->kind);
     
-    // Same size - nop
-    if (from_base_type == to_base_type) {
+    // 64-bit to 64-bit (ptr or integer signed/unsigend) - NOP
+    if (from_base_type == 'l' && to_base_type == 'l') {
       return from_tmp;
     }
 
     if (from->size < to->size) {
-      // We sign/zero extend the 'from' type to the 'to' type
+      // We sign/zero extend the 'from' type to the 'to' base type
       char from_sign = from->is_unsigned ? 'u' : 's';
+      println("  # rpj from->size %d < to->size %d - from_sign is %c", from->size, to->size, from_sign);
       println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, from_sign, qbe_ext_type(node->tok, from), from_tmp);
       return to_tmp;
     }
 
     // from->size >= to->size
-    // We mask the "from" value to the "to" value size
-    long mask = ((long)1 << (to->size * 8)) - 1;
-    println("  %%.%d =%c and %%.%d, %ld # 0x%lx", to_tmp, to_base_type, from_tmp, mask, mask);
+    /* // We mask the "from" value to the "to" value size */
+    /* long mask = ((long)1 << (to->size * 8)) - 1; */
+    /* println("  %%.%d =%c and %%.%d, %ld # 0x%lx", to_tmp, to_base_type, from_tmp, mask, mask); */
+    // We sign/zero extend the 'to' type to the 'to' base type
+    char to_sign = to->is_unsigned ? 'u' : 's';
+    println("  # rpj from->size %d >= to->size %d - to_sign is %c\n", from->size, to->size, to_sign);
+    println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, to_sign, qbe_ext_type(node->tok, to), from_tmp);
     return to_tmp;
   }
 
