@@ -29,18 +29,20 @@ static void print(char *fmt, ...) {
   va_end(ap);
 }
 
-static void printstructident(Type* ty) {
-  // Use the memory address of the type to disambiguate homonymous structs
+static void print_struct_ident_qbe(Type* ty) {
+  // Include the memory address of the type to disambiguate homonymous and anon structs
   print("%s.%lx", (ty->ident ? ty->ident : "anon"), (long)ty);
 }
 
-static void printparamtype(Type* ty) {
+// The extended type - used for struct members
+static void print_ext_type_qbe(Token* tok, Type* ty) {
   char t = 0;
   bool skip = false;
   
   switch (ty->kind) {
   case TY_VOID:
     skip = true;
+    error_tok(tok, "Invalid type void for struct/union member");
     break;
     
   case TY_BOOL:
@@ -77,18 +79,78 @@ static void printparamtype(Type* ty) {
   case TY_STRUCT:
   case TY_UNION:
     print(":");
-    printstructident(ty);
+    print_struct_ident_qbe(ty);
     skip = true;
+    break;
+    
+  default:
+    error_tok(tok, "BUG: unhandled type %d in print_ext_type_qbe() in RPJ/QBE", ty->kind);
+    break;
+  }
+
+  if (!skip)
+    print("%c", t);
+
+}
+
+// Base type except for struct/unions
+static void print_param_type_qbe(Token* tok, Type* ty) {
+  char t = 0;
+  bool skip = false;
+  
+  switch (ty->kind) {
+  case TY_VOID:
+    skip = true;
+    error_tok(tok, "Invalid type void for function parameter");
+    break;
+    
+  case TY_BOOL:
+  case TY_CHAR:
+  case TY_SHORT:
+  case TY_INT:
+  case TY_ENUM:
+    t = 'w';
+    break;
+    
+  case TY_FLOAT:
+    t = 's';
+    break;
+    
+  case TY_DOUBLE:
+  case TY_LDOUBLE:
+    t = 'd';
+    break;
+
+  case TY_LONG:
+  case TY_PTR:
+  case TY_FUNC:
+  case TY_ARRAY:
+  case TY_VLA: // variable-length array
+    t = 'l';
+    break;
+    
+  case TY_STRUCT:
+  case TY_UNION:
+    print(":");
+    print_struct_ident_qbe(ty);
+    skip = true;
+    break;
+
+  default:
+    error_tok(tok, "BUG: unhandled type %d in print_param_type_qbe() in RPJ/QBE", ty->kind);
+    break;
   }
 
   if (!skip)
     print("%c", t);
 }
 
-static char qbe_base_type(Type* ty) {
+// Tok for error msg only
+static char qbe_base_type(Token* tok, Type* ty) {
   switch (ty->kind) {
   case TY_VOID:
-    return 'l'; // ??? Be careful where this is used
+    error_tok(tok, "Invalid type void");
+    return '!';
     
   case TY_BOOL:
   case TY_CHAR:
@@ -112,15 +174,16 @@ static char qbe_base_type(Type* ty) {
   case TY_STRUCT:
   case TY_UNION:
     return 'l';
+
+  default:
+    error_tok(tok, "BUG: unhandled type %d in qbe_base_type() in RPJ/QBE", ty->kind);
+    return '!';
   }
-  return '!';
 }
 
-static char qbe_ext_type(Type* ty) {
+// Tok for error msg only
+static char qbe_ext_type(Token* tok, Type* ty) {
   switch (ty->kind) {
-  case TY_VOID:
-    return 'l'; // ??? Be careful where this is used
-    
   case TY_CHAR:
   case TY_SHORT:
   case TY_INT:
@@ -144,45 +207,42 @@ static char qbe_ext_type(Type* ty) {
   case TY_UNION:
     return 'l';
   }
-  return '!';
+
+  error_tok(tok, "BUG: unhandled type %d in qbe_ext_type() in RPJ/QBE", ty->kind);
 }
 
-static void printstructarraytype(Type* ty, unsigned long accum) {
+static void print_array_member_type_qbe(Token* tok, Type* ty, unsigned long accum) {
   if (ty->kind == TY_ARRAY) {
-    printstructarraytype(ty->base, accum * ty->array_len);
+    print_array_member_type_qbe(tok, ty->base, accum * ty->array_len);
   }
   else {
-    printparamtype(ty);
+    print_ext_type_qbe(tok, ty);
     print(" %lu", accum);
   }
 }
 
-static void printstructmembertype(Type* ty) {
+// Tok just for error msg
+static void print_struct_member_type_qbe(Token* tok, Type* ty) {
   // Arrays are inlined in structs
   if (ty->kind == TY_ARRAY) {
     // Need to multiply out multi-dimensional arrays...
-    printstructarraytype(ty->base, ty->array_len);
+    print_array_member_type_qbe(tok, ty->base, ty->array_len);
     return;
   }
 
-  printparamtype(ty);
+  print_ext_type_qbe(tok, ty);
 }
 
-/* static void printlocalvartype(Type* ty) { */
-/*   // structs and unions are just pointers, represented as long 'l' */
-/*   if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) { */
-/*     print("%c", 'l'); */
-/*     return; */
-/*   } */
-
-/*   printparamtype(ty); */
-/* } */
-
-// QBE identifier for a param or local variable
-static void printlocalname(Obj* local) {
+// QBE identifier for a (non-param) local variable
+static void print_local_name_qbe(Obj* local) {
   print(".%s.%d", local->name, -local->offset);
 }
 
+// QBE identifier for a parameter
+static void print_param_name_qbe(Obj* param) {
+  print(".param");
+  print_local_name_qbe(param);
+}
 
 static int count(void) {
   static int i = 1;
@@ -200,7 +260,7 @@ static int gen_addr_qbe(Node *node) {
     // Local variable
     if (node->var->is_local) {
       print("  %%.%d =l copy %%", tmp);
-      printlocalname(node->var);
+      print_local_name_qbe(node->var);
       print("\n");
       return tmp;
     }
@@ -208,8 +268,6 @@ static int gen_addr_qbe(Node *node) {
     // Thread-local variable
     if (node->var->is_tls) {
       error_tok(node->tok, "thread-local variables not yet supported by RPJ/QBE");
-      /* println("#  mov %%fs:0, %%rax"); */
-      /* println("#  add $%s@tpoff, %%rax", node->var->name); */
       return tmp;
     }
 
@@ -233,16 +291,12 @@ static int gen_addr_qbe(Node *node) {
     break;
   case ND_ASSIGN:
   case ND_COND:
-    // TODO - this seems dodgy - what are we doing here?
     if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
       return gen_expr_qbe(node);
     }
-    // TODO - nothing!!! ???
     break;
   case ND_VLA_PTR:
-    // TODO - not sure about this
     error_tok(node->tok, "ND_VLA_PTR not yet supported by RPJ/QBE");
-    /* println("#  lea %d(%%rbp), %%rax", node->var->offset); */
     return tmp;
   }
 
@@ -250,13 +304,12 @@ static int gen_addr_qbe(Node *node) {
 }
 
 // return temporary containing the loaded value
-static int load_qbe(int from_tmp, Type *ty) {
+static int load_qbe(Node* node, int from_tmp, Type *ty) {
   int to_tmp = current_tmp++;
   char sign = ty->is_unsigned ? 'u' : 's';
 
   switch (ty->kind) {
   case TY_BOOL:
-    // TODO check this - byte?
     println("  %%.%d =w loadub %%.%d", to_tmp, from_tmp);
     return to_tmp;
   case TY_CHAR:
@@ -296,11 +349,11 @@ static int load_qbe(int from_tmp, Type *ty) {
     return to_tmp;
   }
 
-  error("BUG: unhandled type %d in load_qbe() in RPJ/QBE", ty->kind);
+  error_tok(node->tok, "BUG: unhandled type %d in load_qbe() in RPJ/QBE", ty->kind);
 
 }
 
-static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
+static void store_qbe(Node* node, int val_tmp, int addr_tmp, Type *ty) {
   if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
     // Do a memcpy rather than a member-wise copy cos it copes with unions
     // In this case val_tmp is the address of the struct/union to be copied
@@ -341,7 +394,8 @@ static void store_qbe(int val_tmp, int addr_tmp, Type *ty) {
     }
     return;
   }
-  println("  store%c %%.%d, %%.%d", qbe_ext_type(ty), val_tmp, addr_tmp);
+  
+  println("  store%c %%.%d, %%.%d", qbe_ext_type(node->tok, ty), val_tmp, addr_tmp);
 }
 
 static bool is_integer_like(Type* ty) {
@@ -351,11 +405,10 @@ static bool is_integer_like(Type* ty) {
 }
 
 // return tmp with the cast value
-static int cast_qbe(int from_tmp, Type *from, Type *to) {
+static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
   int to_tmp = current_tmp++;
   
   if (to->kind == TY_VOID) {
-    // Is this necessary?
     println("  %%.%d =l copy 0", to_tmp);
     return to_tmp;
   }
@@ -364,8 +417,8 @@ static int cast_qbe(int from_tmp, Type *from, Type *to) {
     return from_tmp;
   }
 
-  char from_base_type = qbe_base_type(from);
-  char to_base_type = qbe_base_type(to);
+  char from_base_type = qbe_base_type(node->tok, from);
+  char to_base_type = qbe_base_type(node->tok, to);
   
   if (to->kind == TY_BOOL) {
     println("  %%.%d =%c cne%c %%.%d, 0", to_tmp, from_base_type, to_base_type, from_tmp);
@@ -386,7 +439,7 @@ static int cast_qbe(int from_tmp, Type *from, Type *to) {
     if (from->size < to->size) {
       // We sign/zero extend the 'from' type to the 'to' type
       char from_sign = from->is_unsigned ? 'u' : 's';
-      println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, from_sign, qbe_ext_type(from), from_tmp);
+      println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, from_sign, qbe_ext_type(node->tok, from), from_tmp);
       return to_tmp;
     }
 
@@ -405,15 +458,8 @@ static int cast_qbe(int from_tmp, Type *from, Type *to) {
     println("  %%.%d =%c %s%cto%s%c %%.%d", to_tmp, to_base_type, from_sign, from_base_type, to_sign, to_base_type, from_tmp);
     return to_tmp;
   }
-
-  // Int to pointer - mainly for (t*)0
-  // TODO probs need to do this more broadly - and use sign?
-  /* if (from_base_type == 'w' && to_base_type == 'l') { */
-  /*   println("  %%.%d =l extuw %%.%d", to_tmp, from_tmp); */
-  /*   return to_tmp; */
-  /* } */
   
-  error("BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
+  error_tok(node->tok, "BUG: unhandled types %d to %d in cast_qbe() in RPJ/QBE", from->kind, to->kind);
 }
 
 // Structs or unions equal or smaller than 16 bytes are passed
@@ -446,36 +492,6 @@ static bool has_flonum(Type *ty, int lo, int hi, int offset) {
   return offset < lo || hi <= offset || ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE;
 }
 
-// TODO...
-/* static void builtin_alloca(void) { */
-/*   error_tok(node->tok, "alloca builtin not yet supported by RPJ/QBE"); */
-/*   // Align size to 16 bytes. */
-/*   println("#  add $15, %%rdi"); */
-/*   println("#  and $0xfffffff0, %%edi"); */
-
-/*   // Shift the temporary area by %rdi. */
-/*   println("#  mov %d(%%rbp), %%rcx", current_fn->alloca_bottom->offset); */
-/*   println("#  sub %%rsp, %%rcx"); */
-/*   println("#  mov %%rsp, %%rax"); */
-/*   println("#  sub %%rdi, %%rsp"); */
-/*   println("#  mov %%rsp, %%rdx"); */
-/*   println("#1:"); */
-/*   println("#  cmp $0, %%rcx"); */
-/*   println("#  je 2f"); */
-/*   println("#  mov (%%rax), %%r8b"); */
-/*   println("#  mov %%r8b, (%%rdx)"); */
-/*   println("#  inc %%rdx"); */
-/*   println("#  inc %%rax"); */
-/*   println("#  dec %%rcx"); */
-/*   println("#  jmp 1b"); */
-/*   println("#2:"); */
-
-/*   // Move alloca_bottom pointer. */
-/*   println("#  mov %d(%%rbp), %%rax", current_fn->alloca_bottom->offset); */
-/*   println("#  sub %%rdi, %%rax"); */
-/*   println("#  mov %%rax, %d(%%rbp)", current_fn->alloca_bottom->offset); */
-/* } */
-
 // Generate code for a given node.
 static int gen_expr_qbe(Node *node) {
   int tmp = current_tmp++;
@@ -500,48 +516,34 @@ static int gen_expr_qbe(Node *node) {
       union { double f64; uint64_t u64; } u = { node->fval };
       println("  %%.%d =d copy %lu # (long double) %.17g reducing long double to double!!!", tmp, u.u64, u.f64);
       return tmp;
-      /* union { long double f80; uint64_t u64[2]; } u; */
-      /* memset(&u, 0, sizeof(u)); */
-      /* u.f80 = node->fval; */
-      /* println("#  mov $%lu, %%rax  # long double %Lf", u.u64[0], node->fval); */
-      /* println("#  mov %%rax, -16(%%rsp)"); */
-      /* println("#  mov $%lu, %%rax", u.u64[1]); */
-      /* println("#  mov %%rax, -8(%%rsp)"); */
-      /* println("#  fldt -16(%%rsp)"); */
-      /* return tmp; */
     }
     }
 
-    println("  %%.%d =%c copy %ld", tmp, qbe_base_type(node->ty), node->val);
+    println("  %%.%d =%c copy %ld", tmp, qbe_base_type(node->tok, node->ty), node->val);
     return tmp;
   }
   case ND_NEG: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    println("  %%.%d =%c neg %%.%d", tmp, qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c neg %%.%d", tmp, qbe_base_type(node->tok, node->ty), val_tmp);
     return tmp;
   }
   case ND_VAR: {
     int addr_tmp = gen_addr_qbe(node);
-    return load_qbe(addr_tmp, node->ty);
+    return load_qbe(node, addr_tmp, node->ty);
   }
   case ND_MEMBER: {
     int addr_tmp = gen_addr_qbe(node);
-    tmp = load_qbe(addr_tmp, node->ty);
+    tmp = load_qbe(node, addr_tmp, node->ty);
 
     Member *mem = node->member;
     if (mem->is_bitfield) {
       error_tok(node->tok, "bitfield not yet supported by QBE/RPJ");
-      /* println("#  shl $%d, %%rax", 64 - mem->bit_width - mem->bit_offset); */
-      /* if (mem->ty->is_unsigned) */
-      /*   println("#  shr $%d, %%rax", 64 - mem->bit_width); */
-      /* else */
-      /*   println("#  sar $%d, %%rax", 64 - mem->bit_width); */
     }
     return tmp;
   }
   case ND_DEREF: {
     int addr_tmp = gen_expr_qbe(node->lhs);
-    return load_qbe(addr_tmp, node->ty);
+    return load_qbe(node, addr_tmp, node->ty);
   }
   case ND_ADDR:
     return gen_addr_qbe(node->lhs);
@@ -550,50 +552,35 @@ static int gen_expr_qbe(Node *node) {
 
     if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
       error_tok(node->tok, "bitfield not yet supported by QBE/RPJ");
-      /* println("#  mov %%rax, %%r8"); */
-
-      /* // If the lhs is a bitfield, we need to read the current value */
-      /* // from memory and merge it with a new value. */
-      /* Member *mem = node->lhs->member; */
-      /* println("#  mov %%rax, %%rdi"); */
-      /* println("#  and $%ld, %%rdi", (1L << mem->bit_width) - 1); */
-      /* println("#  shl $%d, %%rdi", mem->bit_offset); */
-
-      /* println("#  mov (%%rsp), %%rax"); */
-      /* load(mem->ty); */
-
-      /* long mask = ((1L << mem->bit_width) - 1) << mem->bit_offset; */
-      /* println("#  mov $%ld, %%r9", ~mask); */
-      /* println("#  and %%r9, %%rax"); */
-      /* println("#  or %%rdi, %%rax"); */
-      /* store(node->ty); */
-      /* println("#  mov %%r8, %%rax"); */
-      /* return tmp; */
     }
 
     int addr_tmp = gen_addr_qbe(node->lhs);
-    store_qbe(val_tmp, addr_tmp, node->ty);
+    store_qbe(node, val_tmp, addr_tmp, node->ty);
     return val_tmp;
   }
   case ND_STMT_EXPR:
     for (Node *n = node->body; n; n = n->next)
       gen_stmt_qbe(n);
-    // TODO ???
-    println("  %%.%d =%c copy 0", tmp, qbe_base_type(node->ty));
+    println("  %%.%d =%c copy 0", tmp, qbe_base_type(node->tok, node->ty));
+    error_tok(node->tok, "BUG: statement expressions not correctly supported in RPJ/QBE");
     return tmp;
   case ND_COMMA:
     gen_expr_qbe(node->lhs);
     return gen_expr_qbe(node->rhs);
   case ND_CAST: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    return cast_qbe(val_tmp, node->lhs->ty, node->ty);
+    return cast_qbe(node, val_tmp, node->lhs->ty, node->ty);
   }
   case ND_MEMZERO: {
     int base_addr_tmp = current_tmp++;
     print("  %%.%d =l copy %%", base_addr_tmp);
-    // TODO - is this always a local var?
-    printlocalname(node->var);
-    print("\n");
+    if (node->var->is_local && !node->var->is_param) {
+      print_local_name_qbe(node->var);
+      print("\n");
+    }
+    else {
+      error_tok(node->tok, "BUG: memzero of non-local '%s' not supported in RPJ/QBE", node->var->name);
+    }
     
     int offset = 0;
     if (node->var->ty->align >= 8) {
@@ -629,22 +616,22 @@ static int gen_expr_qbe(Node *node) {
     println("  jnz %%.%d, @q.%d.then, @q.%d.else", cond_tmp, c, c);
     println("@q.%d.then", c);
     int then_tmp = gen_expr_qbe(node->then);
-    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), then_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->tok, node->ty), then_tmp);
     println("  jmp @q.%d.end", c);
     println("@q.%d.else", c);
     int else_tmp = gen_expr_qbe(node->els);
-    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), else_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->tok, node->ty), else_tmp);
     println("@q.%d.end", c);
     return tmp;
   }
   case ND_NOT: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    println("  %%.%d =%c ceq%c %%.%d, 0", tmp, qbe_base_type(node->ty), qbe_base_type(node->ty), val_tmp);
+    println("  %%.%d =%c ceq%c %%.%d, 0", tmp, qbe_base_type(node->tok, node->ty), qbe_base_type(node->tok, node->ty), val_tmp);
     return tmp;
   }
   case ND_BITNOT: {
     int val_tmp = gen_expr_qbe(node->lhs);
-    println(" %%.%d =%c xor %%.%d, -1", tmp, qbe_base_type(node->ty), val_tmp);
+    println(" %%.%d =%c xor %%.%d, -1", tmp, qbe_base_type(node->tok, node->ty), val_tmp);
     return tmp;
   }
   case ND_LOGAND: {
@@ -652,11 +639,11 @@ static int gen_expr_qbe(Node *node) {
     int lhs_tmp = gen_expr_qbe(node->lhs);
     println("  jnz %%.%d, @and.%d.false, @and.%d.true", lhs_tmp, c, c);
     println("@and.%d.true", c);
-    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->tok, node->ty), lhs_tmp);
     println("  jmp @and.%d.end", c);
     println("@and.%d.false", c);
     int rhs_tmp = gen_expr_qbe(node->rhs);
-    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), rhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->tok, node->ty), rhs_tmp);
     println("@and.%d.end", c);
     return tmp;
   }
@@ -665,20 +652,17 @@ static int gen_expr_qbe(Node *node) {
     int lhs_tmp = gen_expr_qbe(node->lhs);
     println("  jnz %%.%d, @or.%d.true, @or.%d.false", lhs_tmp, c, c);
     println("@or.%d.true", c);
-    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), lhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->tok, node->ty), lhs_tmp);
     println("  jmp @or.%d.end", c);
     println("@or.%d.false", c);
     int rhs_tmp = gen_expr_qbe(node->rhs);
-    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->ty), rhs_tmp);
+    println("  %%.%d =%c copy %%.%d", tmp, qbe_base_type(node->tok, node->ty), rhs_tmp);
     println("@or.%d.end", c);
     return tmp;
   }
   case ND_FUNCALL: {
     if (node->lhs->kind == ND_VAR && !strcmp(node->lhs->var->name, "alloca")) {
       error_tok(node->tok, "alloca builtin not yet supported by RPJ/QBE");
-      /* gen_expr_qbe(node->args); */
-      /* println("#  mov %%rax, %%rdi"); */
-      /* builtin_alloca(); */
       return tmp;
     }
 
@@ -702,10 +686,11 @@ static int gen_expr_qbe(Node *node) {
       print("  ");
     }
     else {
-      print("  %%.%d =%c  ", tmp, qbe_base_type(node->ty));
+      print("  %%.%d =", tmp);
+      print_param_type_qbe(node->tok, node->ty);
+      print(" ");
     }
 
-    // TODO remove fn_addr_tmp for most calls - ugh! Maybe QBE will do this for us?
     print("call ");
     if (is_direct)
       print("$%s", node->lhs->var->name);
@@ -728,41 +713,25 @@ static int gen_expr_qbe(Node *node) {
 	}
       }
       print(" ");
-      printparamtype(arg->ty);
+      print_param_type_qbe(arg->tok, arg->ty);
       print(" %%.%d,", arg->val_tmp);
     }
     println(")");
 
     if (node->ty->kind == TY_VOID) {
       // This is required for assert() compilation.
-      println("  %%.%d =%c copy 0", tmp, qbe_base_type(node->ty));
+      fprintf(stderr, "Doing dummy void val creation for assert???\n");
+      println("  %%.%d =l copy 0", tmp);
+      fprintf(stderr, "...done dummy void val creation for assert???\n");
     }
     
     return tmp;
   }
   case ND_LABEL_VAL:
     error_tok(node->tok, "label values not yet supported by RPJ/QBE");
-    /* println("#  lea %s(%%rip), %%rax", node->unique_label); */
     return tmp;
   case ND_CAS: {
     error_tok(node->tok, "CaS not yet supported by RPJ/QBE");
-    /* gen_expr_qbe(node->cas_addr); */
-    /* push(); */
-    /* gen_expr_qbe(node->cas_new); */
-    /* push(); */
-    /* gen_expr_qbe(node->cas_old); */
-    /* println("#  mov %%rax, %%r8"); */
-    /* load(node->cas_old->ty->base); */
-    /* pop("%rdx"); // new */
-    /* pop("%rdi"); // addr */
-
-    /* int sz = node->cas_addr->ty->base->size; */
-    /* println("#  lock cmpxchg %s, (%%rdi)", reg_dx(sz)); */
-    /* println("#  sete %%cl"); */
-    /* println("#  je 1f"); */
-    /* println("#  mov %s, (%%r8)", reg_ax(sz)); */
-    /* println("#1:"); */
-    /* println("#  movzbl %%cl, %%eax"); */
     return tmp;
   }
   case ND_EXCH: {
@@ -778,8 +747,8 @@ static int gen_expr_qbe(Node *node) {
   }
   }
 
-  char base_type = qbe_base_type(node->ty);
-  char lhs_base_type = qbe_base_type(node->lhs->ty);
+  char base_type = qbe_base_type(node->tok, node->ty);
+  char lhs_base_type = qbe_base_type(node->lhs->tok, node->lhs->ty);
 
   switch (node->lhs->ty->kind) {
   case TY_FLOAT:
@@ -930,7 +899,7 @@ static void gen_stmt_qbe(Node *node) {
   case ND_SWITCH: {
     //error_tok(node->tok, "switch not yet supported by QBE/RPJ");
     int val_tmp = gen_expr_qbe(node->cond);
-    char base_type = qbe_base_type(node->cond->ty);
+    char base_type = qbe_base_type(node->cond->tok, node->cond->ty);
 
     for (Node *n = node->case_next; n; n = n->case_next) {
       int cmp_tmp = current_tmp++;
@@ -1089,7 +1058,7 @@ static void emit_member_types_qbe(Member* members) {
 static void emit_struct_members_qbe(Member* members) {
   for(Member* member = members; member; member = member->next) {
     print(" ");
-    printstructmembertype(member->ty);
+    print_struct_member_type_qbe(member->tok, member->ty);
     print(",");
   }
 }
@@ -1098,7 +1067,7 @@ static void emit_struct_type_qbe(Type* ty) {
   emit_member_types_qbe(ty->members);
 
   print("type :");
-  printstructident(ty);
+  print_struct_ident_qbe(ty);
   print(" = align %d {", ty->align);
   emit_struct_members_qbe(ty->members);
   println(" }%s\n", (ty->is_packed ? " # TODO packed" :""));
@@ -1109,7 +1078,7 @@ static void emit_union_type_qbe(Type* ty) {
 
   // We treat unions as opaque types
   print("type :");
-  printstructident(ty);
+  print_struct_ident_qbe(ty);
   println(" = align %d { %d }\n", ty->align, ty->size);
 }
 
@@ -1508,14 +1477,15 @@ static void emit_text_qbe(Obj *prog) {
     print("function ");
     
     if (fn->ty->return_ty->kind != TY_VOID) {
-      print("%c ", qbe_base_type(fn->ty->return_ty));
+      print_param_type_qbe(fn->tok, fn->ty->return_ty);
+      print(" ");
     }
     
     print("$%s (", fn->name);
     for (Obj *var = fn->params; var; var = var->next) {
-      printparamtype(var->ty);
-      print(" %%.param");
-      printlocalname(var);
+      print_param_type_qbe(var->tok, var->ty);
+      print(" %%");
+      print_param_name_qbe(var);
       if (var->next)
 	print(", ");
     }
@@ -1542,15 +1512,15 @@ static void emit_text_qbe(Obj *prog) {
 
       int align = MAX(4, var->align);
       print("  %%");
-      printlocalname(var);
+      print_local_name_qbe(var);
       println(" =l alloc%d %d", align, var->ty->size);
       if (var->is_param) {
-      	// Copy to the stack local to allow &param
-	print("  store%c %%.param", qbe_base_type(var->ty));
-	printlocalname(var);
+      	// Copy param to a shadow local to allow &param
+	print("  store%c %%", qbe_base_type(var->tok, var->ty));
+	print_param_name_qbe(var);
 	print(", ");
 	print("%%");
-	printlocalname(var);
+	print_local_name_qbe(var);
 	print("\n");
       }
     }
