@@ -328,7 +328,7 @@ static int load_qbe(Node* node, int from_tmp, Type *ty) {
     return to_tmp;
   case TY_LONG:
   case TY_PTR:
-    println("  %%.%d =l loadd %%.%d", to_tmp, from_tmp);
+    println("  %%.%d =l loadl %%.%d", to_tmp, from_tmp);
     return to_tmp;
   case TY_ARRAY:
   case TY_STRUCT:
@@ -412,7 +412,7 @@ static bool is_integer_like(Type* ty) {
 static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
   int to_tmp = current_tmp++;
   
-  println("  # RPJ - casting from type %d to %d", from->kind, to->kind);
+  //println("  # RPJ - casting from type %d to %d", from->kind, to->kind);
     
   if (to->kind == TY_VOID) {
     println("  %%.%d =l copy 0", to_tmp);
@@ -437,7 +437,7 @@ static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
   // Integer to integer casts or integer to/from ptr
   if (is_from_integer_like && is_to_integer_like) {
 
-    println("  # RPJ - integer-like casting from type %d to %d", from->kind, to->kind);
+    //println("  # RPJ - integer-like casting from type %d to %d", from->kind, to->kind);
     
     // 64-bit to 64-bit (ptr or integer signed/unsigend) - NOP
     if (from_base_type == 'l' && to_base_type == 'l') {
@@ -447,7 +447,7 @@ static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
     if (from->size < to->size) {
       // We sign/zero extend the 'from' type to the 'to' base type
       char from_sign = from->is_unsigned ? 'u' : 's';
-      println("  # rpj from->size %d < to->size %d - from_sign is %c", from->size, to->size, from_sign);
+      //println("  # rpj from->size %d < to->size %d - from_sign is %c", from->size, to->size, from_sign);
       println("  %%.%d =%c ext%c%c %%.%d", to_tmp, to_base_type, from_sign, qbe_ext_type(node->tok, from), from_tmp);
       return to_tmp;
     }
@@ -463,7 +463,7 @@ static int cast_qbe(Node *node, int from_tmp, Type *from, Type *to) {
 
     // To-size smaller than a 'w', so sign/zero extend the 'to' type to the 'to' size (w)
     char to_sign = to->is_unsigned ? 'u' : 's';
-    println("  # rpj from->size %d >= to->size %d - to_sign is %c\n", from->size, to->size, to_sign);
+    //println("  # rpj from->size %d >= to->size %d - to_sign is %c\n", from->size, to->size, to_sign);
     println("  %%.%d =w ext%c%c %%.%d", to_tmp, to_sign, qbe_ext_type(node->tok, to), from_tmp);
     return to_tmp;
   }
@@ -568,9 +568,9 @@ static int gen_expr_qbe(Node *node) {
   case ND_ADDR:
     return gen_addr_qbe(node->lhs);
   case ND_ASSIGN: {
-    println("  # ND_ASSIGN - type is %d, rhs is node type %d, rhs type is %d\n", node->ty->kind, node->rhs->kind, node->rhs->ty->kind);
+    //println("  # ND_ASSIGN - type is %d, rhs is node type %d, rhs type is %d\n", node->ty->kind, node->rhs->kind, node->rhs->ty->kind);
     int val_tmp = gen_expr_qbe(node->rhs);
-    println("  # ... ND_ASSIGN - type is %d, val in %d\n", node->ty->kind, val_tmp);
+    //println("  # ... ND_ASSIGN - type is %d, val in %d\n", node->ty->kind, val_tmp);
 
     if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
       error_tok(node->tok, "bitfield not yet supported by QBE/RPJ");
@@ -590,9 +590,9 @@ static int gen_expr_qbe(Node *node) {
     gen_expr_qbe(node->lhs);
     return gen_expr_qbe(node->rhs);
   case ND_CAST: {
-    println("  # cast node - from %d to %d", node->lhs->ty->kind, node->ty->kind);
+    //println("  # cast node - from %d to %d", node->lhs->ty->kind, node->ty->kind);
     int val_tmp = gen_expr_qbe(node->lhs);
-    println("  # ... cast node - from %d to %d - doing cast", node->lhs->ty->kind, node->ty->kind);
+    //println("  # ... cast node - from %d to %d - doing cast", node->lhs->ty->kind, node->ty->kind);
     return cast_qbe(node, val_tmp, node->lhs->ty, node->ty);
   }
   case ND_MEMZERO: {
@@ -690,7 +690,7 @@ static int gen_expr_qbe(Node *node) {
       return tmp;
     }
 
-    println("  # Function call - return type is %d", node->ty->kind);
+    //println("  # Function call - return type is %d", node->ty->kind);
 
     // Generate a tmp for each arg
     for (Node *arg = node->args; arg; arg = arg->next) {
@@ -751,7 +751,7 @@ static int gen_expr_qbe(Node *node) {
       fprintf(stderr, "...done dummy void val creation for assert???\n");
     }
     
-    println("  # ... function call - return type is %d in tmp %d", node->ty->kind, tmp);
+    //println("  # ... function call - return type is %d in tmp %d", node->ty->kind, tmp);
     return tmp;
   }
   case ND_LABEL_VAL:
@@ -1100,13 +1100,22 @@ static void emit_struct_type_qbe(Type* ty) {
   println(" }%s\n", (ty->is_packed ? " # TODO packed" :""));
 }
 
+static void emit_union_members_qbe(Member* members) {
+  for(Member* member = members; member; member = member->next) {
+    print(" { ");
+    print_struct_member_type_qbe(member->tok, member->ty);
+    print(" }");
+  }
+}
+
 static void emit_union_type_qbe(Type* ty) {
   emit_member_types_qbe(ty->members);
 
-  // We treat unions as opaque types
   print("type :");
   print_struct_ident_qbe(ty);
-  println(" = align %d { %d }\n", ty->align, ty->size);
+  print(" = align %d {", ty->align);
+  emit_union_members_qbe(ty->members);
+  println(" }\n");
 }
 
 static void emit_type_qbe(Type* ty) {
@@ -1538,12 +1547,6 @@ static void emit_text_qbe(Obj *prog) {
 	continue;
       }
       
-      // Chibicc generates empty-name locals for function calls with
-      // struct/union return type. We don't need these here either.
-      if (var->name == 0 || var->name[0] == 0) {
-	continue;
-      }
-
       int align = MAX(4, var->align);
       print("  %%");
       print_local_name_qbe(var);
